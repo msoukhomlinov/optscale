@@ -152,6 +152,67 @@ def test_cache_isolated_by_subscription_id(api_mock):
     )
 
 
+def test_cache_isolated_by_subscription_id_distinct_values(api_mock):
+    """Cached rate for subA must not bleed into subB when they share
+    region/redundancy/tier but hold different reservation sets.
+
+    subA  — Single-scope reservation targeting /subscriptions/subA → rate 0.02
+    subB  — no reservations → rate None
+
+    The test exercises three guarantees:
+      1. subA resolves to the reservation rate, not None.
+      2. subB resolves to None despite the prior subA cache entry.
+      3. A second subA call returns 0.02 from cache without hitting the SDK
+         again (list_all call_count does not increase after the subB call).
+    """
+    res_a = _Reservation(
+        sku_name="Blob_Storage_Reserved_Capacity_LRS_Hot_100TB",
+        applied_scope_type="Single",
+        applied_scopes=["/subscriptions/subA"],
+    )
+    api_mock.return_value.reservation.list_all.side_effect = [
+        iter([res_a]),  # subA first call
+        iter([]),       # subB first call — subA second call must hit cache
+    ]
+
+    with mock.patch.object(reservations,
+                           "_fetch_retail_reservation_rate",
+                           return_value=0.02):
+        rate_a_first = get_effective_storage_rate(
+            credential=mock.Mock(), subscription_id="subA",
+            region="eastus", redundancy="LRS", tier="Hot")
+
+        count_after_sub_a = (
+            api_mock.return_value.reservation.list_all.call_count)
+
+        rate_b = get_effective_storage_rate(
+            credential=mock.Mock(), subscription_id="subB",
+            region="eastus", redundancy="LRS", tier="Hot")
+
+        rate_a_second = get_effective_storage_rate(
+            credential=mock.Mock(), subscription_id="subA",
+            region="eastus", redundancy="LRS", tier="Hot")
+
+    assert rate_a_first == 0.02, (
+        "subA reservation should resolve to the retail rate 0.02; "
+        "Single-scope match with /subscriptions/subA failed"
+    )
+    assert rate_b is None, (
+        "subB has no reservations; subA's cached entry must not bleed into "
+        "subB's lookup — cache key must include subscription_id"
+    )
+    assert rate_a_second == 0.02, (
+        "subA second call must return 0.02 from cache; "
+        "the cached value must survive an interleaved subB lookup"
+    )
+    assert api_mock.return_value.reservation.list_all.call_count == (
+        count_after_sub_a + 1), (
+        "list_all should have been called exactly once for subA (first call) "
+        "and once for subB; subA second call must be served from cache"
+    )
+
+
+
 # ---- BUG 2: applied_scope filter --------------------------------------
 
 def test_single_scope_other_subscription_skipped(api_mock):
