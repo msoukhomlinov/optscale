@@ -207,35 +207,11 @@ def test_other_options_unaffected_by_validator(self):
     code, resp = self.client.organization_option_create(
         self.org_id1, 'arbitrary_option_name', arbitrary_value)
     self.assertEqual(code, 200)
-
-def test_enabled_recommendation_modules_patch_requires_edit_partner(self):
-    # Create the option as org admin, then test unauthorized PATCH.
-    valid_value = {'value': json.dumps({'types': []})}
-    with patch(
-        'rest_api.rest_api_server.controllers.organization_options.'
-        'list_recommendation_module_names',
-        return_value=set()
-    ):
-        # This relies on self.client having EDIT_PARTNER role in setUp.
-        # To test 403, create a second client with lower permissions:
-        client_no_perm = self.get_client(
-            user_id=self.org2['id'])  # adjust to match test_api_base pattern
-        code, _ = client_no_perm.organization_option_update(
-            self.org_id1, 'enabled_recommendation_modules', valid_value)
-    self.assertEqual(code, 403)
-
-def test_enabled_recommendation_modules_get_requires_info_organization(self):
-    # GET without INFO_ORGANIZATION returns 403.
-    # Adjust client creation to match existing permission-test patterns in this file.
-    code, _ = self.client.organization_option_get(
-        self.org_id1, 'enabled_recommendation_modules')
-    # With INFO_ORGANIZATION (default test client): 404 (no row) or 200.
-    self.assertIn(code, [200, 404])
 ```
 
-Note: the two permission tests above use test-base patterns — read existing permission tests in this file (e.g. `test_update_locked_by_user_organization_option`) to verify the exact client factory for creating a lower-permission client before implementing. The skeleton is correct in intent; adjust client creation to match the base class API.
+Note: Permission guards (EDIT_PARTNER for PATCH, INFO_ORGANIZATION for GET) are verified at handler line numbers in Phase 0 and enforced by the existing handler framework — no unit test needed here. `TestApiBase.get_client` does not accept `user_id`, so permission tests in this file require a different base pattern; omitted to avoid unworkable stubs.
 
-- [ ] **Step 2: Run tests — verify all 9 fail**
+- [ ] **Step 2: Run tests — verify all 7 fail**
 
 ```bash
 cd /home/iitadmin/optscale-fork
@@ -338,13 +314,13 @@ Modify `OrganizationOptionsController.patch()` to dispatch validator at the very
 
 Note: `data` here is the bare JSON string. Verified: `handlers/v2/organization_options.py` line 195 does `data = self._request_body().get('value')` before passing to `controller.patch()`. No dict-unwrap needed in the validator.
 
-- [ ] **Step 4: Run tests — verify all 9 pass**
+- [ ] **Step 4: Run tests — verify all 7 pass**
 
 ```bash
 python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_options_api.py -v -k enabled_recommendation_modules
 ```
 
-Expected: all 9 PASS.
+Expected: all 7 PASS.
 
 - [ ] **Step 5: Run full org-options test file — verify no regression**
 
@@ -393,7 +369,11 @@ Covers `InitializeChildrenBase.list_modules` override:
 - Skipped-module info logging
 - Global-disable wins over per-org whitelist
 - Fetch-failure returns empty set + error log
-- InitializeArchive inherits override
+
+Note: InitializeArchive inherits the override via InitializeChildrenBase, but its
+real call path uses 'archive' folder (not 'recommendations'), so the per-org gate
+does NOT apply to archive. This is intentional — archive module names differ from
+recommendation module names. The gate only applies to RECOMMENDATION_FOLDER.
 """
 import json
 import logging
@@ -402,7 +382,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bumiworker.bumiworker.tasks import (
-    InitializeArchive,
     InitializeChecklist,
     InitializeChildrenBase,
     InitializeService,
@@ -419,9 +398,12 @@ def _make_initialize(cls=InitializeChecklist, *, option_response,
     """Build an Initialize* instance with mocked deps.
 
     `option_response`:
-      - dict with 'value' key → simulates present option row (200)
-      - None → simulates absent row (404 → raises requests.HTTPError)
-      - Exception subclass instance → simulates non-404 transport failure
+      - dict with 'value' key → simulates present option row (200 + JSON value)
+      - None → simulates absent row (REST API returns 200 + '{}' sentinel)
+      - Exception instance → simulates transport failure (HTTPError 5xx etc.)
+
+    Note: the REST API NEVER returns 404 for organization_option_get — absent
+    rows return 200 with value='{}'. HTTPError only fires on transport failures.
     """
     import requests
     inst = cls.__new__(cls)
@@ -433,9 +415,9 @@ def _make_initialize(cls=InitializeChecklist, *, option_response,
     if isinstance(option_response, Exception):
         mock_rest_cl.organization_option_get.side_effect = option_response
     elif option_response is None:
-        # rest client raises HTTPError for 404 (response.raise_for_status()).
-        http_err = requests.HTTPError(response=MagicMock(status_code=404))
-        mock_rest_cl.organization_option_get.side_effect = http_err
+        # Absent row: API returns 200 with '{}' sentinel.
+        mock_rest_cl.organization_option_get.return_value = (
+            200, {'value': '{}'})
     else:
         mock_rest_cl.organization_option_get.return_value = (
             200, option_response)
@@ -505,11 +487,11 @@ def test_skipped_module_logged_info(caplog):
 
 
 def test_fetch_failure_returns_empty_state_advances(caplog):
-    # Non-404 transport failure → empty list returned; state machine still advances
+    # Transport failure (5xx) → empty list returned; state machine still advances
     # (existing empty-modules handling at tasks.py:318-321 / :464-470 takes over).
     import requests
-    non_404_err = requests.HTTPError(response=MagicMock(status_code=503))
-    inst, discovered = _make_initialize(option_response=non_404_err)
+    transport_err = requests.HTTPError(response=MagicMock(status_code=503))
+    inst, discovered = _make_initialize(option_response=transport_err)
     with caplog.at_level(logging.ERROR), \
          patch('bumiworker.bumiworker.tasks.list_modules',
                return_value=list(discovered)):
@@ -518,17 +500,6 @@ def test_fetch_failure_returns_empty_state_advances(caplog):
     error_msgs = [r.message for r in caplog.records
                   if r.levelno == logging.ERROR]
     assert any(ORG_ID in m for m in error_msgs)
-
-
-def test_initialize_archive_inherits_override():
-    # Class hierarchy proof: archive uses the same gate.
-    inst, discovered = _make_initialize(
-        cls=InitializeArchive,
-        option_response={'value': json.dumps({'types': ['mod_b']})})
-    with patch('bumiworker.bumiworker.tasks.list_modules',
-               return_value=list(discovered)):
-        result = inst.list_modules('recommendations')
-    assert set(result) == {'mod_b'}
 
 
 def test_initialize_service_inherits_override():
@@ -582,14 +553,12 @@ Read current `bumiworker/bumiworker/tasks.py:269-310` first to confirm class sha
 sed -n '269,310p' bumiworker/bumiworker/tasks.py
 ```
 
-Modify `InitializeChildrenBase.list_modules` (replace existing method around line 277). Add `import json` and `import logging` at top of file if not already present, and add `import requests`:
+Modify `InitializeChildrenBase.list_modules` (replace existing method around line 277). Add `import json` if not already present, and add `import requests`. Do NOT add `import logging` or redefine `LOG` — `tasks.py:21` already defines `LOG = get_logger(__name__)` (kombu). Reusing the existing `LOG` is correct.
 
 ```python
 import json
-import logging
 import requests
 
-LOG = logging.getLogger(__name__)
 ENABLED_MODULES_OPTION_KEY = 'enabled_recommendation_modules'
 ```
 
@@ -609,11 +578,15 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
     def _fetch_enabled_modules_whitelist(self):
         """Fetch per-org whitelist option; cache for instance lifetime.
 
+        The REST API ALWAYS returns 200 for this endpoint — it returns the
+        sentinel string '{}' when no row exists (never 404). HTTPError only
+        fires on genuine transport failures (5xx, auth errors, etc.).
+
         Returns:
             None if option row absent (lazy default → no whitelist enforcement)
             set[str] of whitelisted module names if present
         Raises:
-            requests.HTTPError with status != 404 on transport failure
+            requests.HTTPError on transport failure (non-200 status)
         """
         if self._enabled_modules_cache is not _UNSET:
             if self._enabled_modules_cache is _FETCH_FAILED:
@@ -623,14 +596,16 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         try:
             _, resp = self.rest_cl.organization_option_get(
                 org_id, ENABLED_MODULES_OPTION_KEY)
-        except requests.HTTPError as exc:
-            if exc.response.status_code == 404:
-                # Absent row → lazy default (all enabled).
-                self._enabled_modules_cache = None
-                return None
+        except requests.HTTPError:
             self._enabled_modules_cache = _FETCH_FAILED
             raise
-        parsed = json.loads(resp['value'])
+        raw_value = resp.get('value', '{}')
+        if raw_value == '{}':
+            # Controller returns '{}' sentinel when no option row exists.
+            # Treat as lazy default: all modules enabled.
+            self._enabled_modules_cache = None
+            return None
+        parsed = json.loads(raw_value)
         whitelist = set(parsed.get('types', []))
         self._enabled_modules_cache = whitelist
         return whitelist
@@ -749,6 +724,7 @@ export const SETTINGS_TABS = Object.freeze({
 Open `ngui/ui/src/translations/en-US/app.json` and add (alphabetical position) the following keys. Verify via `grep -c '"recommendationModules"' app.json` returns 0 first to avoid duplicates.
 
 ```json
+  "loading": "Loading…",
   "recommendationModules": "Recommendation Modules",
   "recommendationModuleTabHeading": "Enabled recommendation modules",
   "recommendationModuleTabSubtitle": "Toggle individual modules on or off. Disabled modules are hidden from the overview and skipped at scheduler time.",
@@ -794,14 +770,14 @@ grep -rn "organization_option\|organizationOption" ngui/ui/src/hooks/ ngui/ui/sr
 
 Identify the existing pattern (Apollo/redux/saga). Read at least one example end-to-end (e.g. `useDisabledRecommendations` if it exists; fall back to grep for `organizationOptions` in actions/api).
 
-- [ ] **Step 1.5: Verify 404 behavior in saga / API layer**
+- [ ] **Step 1.5: Verify absent-row sentinel in controller + saga layer**
 
 ```bash
 grep -rn "GET_ORGANIZATION_OPTION\|organization_option_get\|organizationOptionGet" \
   ngui/ui/src/api/ ngui/ui/src/sagas/ 2>/dev/null | head -20
 ```
 
-Confirm: on 404, does the saga skip the SET action (leaving `apiData` at default) or write a sentinel value? The hook contract depends on this. Match existing `OrganizationOptionsService` behavior exactly.
+Confirm: the rest_api controller's `get_by_name` returns `'{}'` (empty JSON object string) when no row exists — the API does NOT return 404 for the GET path. So on "absent row", the saga receives a 200 with `value = '{}'`. The hook's `optionRowExists` check (`rawValue !== "{}"`) correctly distinguishes this sentinel. Match existing `OrganizationOptionsService` behavior exactly to confirm the saga writes the `rawValue` to the store on success.
 
 - [ ] **Step 2: Create hook following identified pattern**
 
@@ -840,7 +816,8 @@ export const useRecommendationModulesOption = () => {
   // rawValue is the JSON string stored by reducer, or null/undefined/default when absent.
   const { apiData: rawValue } = useApiData(GET_ORGANIZATION_OPTION, null);
 
-  // optionRowExists: row present iff API returned a non-empty string (not 404-default).
+  // optionRowExists: controller returns '{}' when no row exists (not 404).
+  // Row is present iff rawValue is a non-empty non-sentinel string.
   const optionRowExists = typeof rawValue === "string" && rawValue.length > 0 && rawValue !== "{}";
 
   const parsed = useMemo<EnabledModulesValue | null>(() => {
