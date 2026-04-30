@@ -211,14 +211,14 @@ def test_other_options_unaffected_by_validator(self):
 
 Note: Permission guards (EDIT_PARTNER for PATCH, INFO_ORGANIZATION for GET) are verified at handler line numbers in Phase 0 and enforced by the existing handler framework — no unit test needed here. `TestApiBase.get_client` does not accept `user_id`, so permission tests in this file require a different base pattern; omitted to avoid unworkable stubs.
 
-- [ ] **Step 2: Run tests — verify all 7 fail**
+- [ ] **Step 2: Run tests — verify 6 fail (7th regression-guard passes pre-implementation)**
 
 ```bash
 cd /home/iitadmin/optscale-fork
 python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_options_api.py -v -k enabled_recommendation_modules
 ```
 
-Expected: 6 tests FAIL (validator not yet implemented — happy paths fail because module-name lookup helper doesn't exist; bad-input tests fail because controller currently accepts anything). The `test_other_options_unaffected_by_validator` test will PASS already since no validator exists yet — leave it as a regression guard for the next step.
+Expected: 6 tests FAIL (validator not yet implemented — happy paths fail because module-name lookup helper doesn't exist; bad-input tests fail because controller currently accepts anything). The `test_other_options_unaffected_by_validator` test PASSES already (no validator = no filtering = any option accepted). Leave it as a regression guard for the next step.
 
 - [ ] **Step 3: Implement validator + dispatch in controller**
 
@@ -314,13 +314,13 @@ Modify `OrganizationOptionsController.patch()` to dispatch validator at the very
 
 Note: `data` here is the bare JSON string. Verified: `handlers/v2/organization_options.py` line 195 does `data = self._request_body().get('value')` before passing to `controller.patch()`. No dict-unwrap needed in the validator.
 
-- [ ] **Step 4: Run tests — verify all 7 pass**
+- [ ] **Step 4: Run all 7 tests — verify all pass**
 
 ```bash
-python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_options_api.py -v -k enabled_recommendation_modules
+python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_options_api.py -v -k "enabled_recommendation_modules or unaffected_by_validator"
 ```
 
-Expected: all 7 PASS.
+Expected: all 7 PASS (6 validator tests + 1 regression guard).
 
 - [ ] **Step 5: Run full org-options test file — verify no regression**
 
@@ -383,7 +383,6 @@ import pytest
 
 from bumiworker.bumiworker.tasks import (
     InitializeChecklist,
-    InitializeChildrenBase,
     InitializeService,
     _UNSET,
 )
@@ -676,7 +675,7 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
 python3 -m pytest bumiworker/bumiworker/tests/test_initialize_children_gating.py -v
 ```
 
-Expected: all 10 tests PASS.
+Expected: all 9 tests PASS.
 
 - [ ] **Step 6: Smoke-import bumiworker to ensure no syntax/import errors**
 
@@ -820,14 +819,11 @@ export const useRecommendationModulesOption = () => {
   // Row is present iff rawValue is a non-empty non-sentinel string.
   const optionRowExists = typeof rawValue === "string" && rawValue.length > 0 && rawValue !== "{}";
 
-  const parsed = useMemo<EnabledModulesValue | null>(() => {
-    if (!optionRowExists) return null;
-    try {
-      return parseJSON(rawValue) as EnabledModulesValue;
-    } catch {
-      return null;
-    }
-  }, [rawValue, optionRowExists]);
+  // parseJSON never throws — it returns fallback on parse error.
+  const parsed = useMemo<EnabledModulesValue | null>(
+    () => (optionRowExists ? (parseJSON(rawValue, null) as EnabledModulesValue | null) : null),
+    [rawValue, optionRowExists]
+  );
 
   const fetchOption = useCallback(() => {
     dispatch(getOrganizationOption(organizationId, OPTION_KEY));
@@ -1136,9 +1132,10 @@ Note the exact `<RecommendationCard ... />` invocation. Disabled-state changes i
 Modify the `CardsProps` type and the rendered `RecommendationCard`:
 
 ```tsx
-import { Badge, Tooltip, Link as MuiLink } from "@mui/material";
+import { Box, Chip, Tooltip, Link as MuiLink } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import { SETTINGS_TABS } from "utils/constants";
+// Note: merge Box/Chip/Tooltip/MuiLink into the existing @mui/material import line in Cards.tsx.
 
 type CardsProps = {
   isLoading: boolean;
@@ -1295,11 +1292,11 @@ Expected: build succeeds.
 - [ ] **Step 4: Roll out**
 
 ```bash
-kubectl -n default rollout restart deploy/rest-api
-kubectl -n default rollout restart deploy/bumi-worker
+kubectl -n default rollout restart deploy/restapi
+kubectl -n default rollout restart deploy/bumiworker
 kubectl -n default rollout restart deploy/ngui
-kubectl -n default rollout status deploy/rest-api --timeout=180s
-kubectl -n default rollout status deploy/bumi-worker --timeout=180s
+kubectl -n default rollout status deploy/restapi --timeout=180s
+kubectl -n default rollout status deploy/bumiworker --timeout=180s
 kubectl -n default rollout status deploy/ngui --timeout=180s
 ```
 
@@ -1332,7 +1329,7 @@ Flip `azure_abandoned_storage_accounts` OFF. Verify:
 - [ ] **Step 3: Verify scheduler skip**
 
 ```bash
-kubectl -n default logs deploy/bumi-worker --tail=200 | grep azure_abandoned_storage_accounts
+kubectl -n default logs deploy/bumiworker --tail=200 | grep azure_abandoned_storage_accounts
 ```
 
 Wait one scheduler tick (check existing tick interval — typically a few minutes). Expected: log line `module=azure_abandoned_storage_accounts skipped (not enabled by org option) for org=<id>`.
