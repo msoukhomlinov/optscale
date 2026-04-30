@@ -43,8 +43,8 @@ Three layers:
 
 - **`rest_api/rest_api_server/controllers/organization_options.py`** — extend `OrganizationOptionsController.patch()` (line 47) with per-name validator dispatch:
   - Add module-level constant: `KEY_VALIDATORS = {"enabled_recommendation_modules": _validate_enabled_modules}`
-  - In `patch()`, before `super().create/update`, lookup `KEY_VALIDATORS.get(name)` and invoke if present.
-  - `_validate_enabled_modules(value_str)`: `json.loads(value_str)` → check shape `{"types": [str, ...]}` → cross-check `types ⊆ list_modules('recommendations')` discovery → raise `WrongArgumentsException` (existing pattern) on mismatch with message including sorted valid list.
+  - **Dispatch placement is critical:** lookup `KEY_VALIDATORS.get(name)` and invoke at the **top of `patch()` after `check_org`**, BEFORE the `if len(options) == 0` branch. This covers both create-path (first save, absent row) and update-path (subsequent saves) with a single dispatch. Placing it inside either branch leaves the other unguarded — the lazy-default first-save case is exactly when validation matters most.
+  - `_validate_enabled_modules(value_str)`: `json.loads(value_str)` → check shape `{"types": [str, ...]}` → cross-check `types ⊆ list_modules('recommendations')` discovery → raise `WrongArgumentsException` (existing pattern at lines 31, 51) on mismatch with message including sorted valid list.
   - Reject malformed JSON with HTTP 400 + clear message.
 - **`bumiworker/bumiworker/tasks.py`** — modify `InitializeChildrenBase.list_modules` (line 277):
   - After existing `discovered \ global_disabled` filter, layer per-org whitelist.
@@ -53,7 +53,7 @@ Three layers:
   - Present option → `json.loads` → intersect with current filtered set.
   - Modules in option but not in `discovered`: log `WARNING module=X stale (in option, not discovered)` once per scheduler-load (de-dupe via in-memory set on Initialize instance).
   - Modules in `discovered` but not in option (when option exists): log `INFO module=X skipped (not enabled by org option)`.
-  - REST/SQL fetch fails → log `ERROR option fetch failed for org=Y`, skip this org's tick (do not dispatch on stale assumption).
+  - REST/SQL fetch fails → log `ERROR option fetch failed for org=Y`, return empty set. Effect: `InitializeChecklist`/`InitializeService` advance state with zero children for this tick (per existing empty-modules handling at `tasks.py:318-321`/`:464-470`). No rec rows produced this cycle; next tick retries fetch. NOT a hard tick-abort — scheduler state machine still progresses.
 - **`bumiworker/bumiworker/modules/module.py`** — no change needed; gate lives in `tasks.py`.
 - **No migration script.** Lazy default eliminates need for backfill.
 
@@ -97,7 +97,7 @@ Three layers:
    - `enabled = (discovered_minus_global_disabled) ∩ whitelist`
    - Modules in `whitelist` but not in `discovered`: log `WARNING module=X stale (in option, not discovered)` once per scheduler-load (de-duped via instance set).
    - Modules in `discovered_minus_global_disabled` but not in `whitelist`: log `INFO module=X skipped (not enabled by org option)`.
-6. **Fetch fails** (REST/SQL down) → log `ERROR option fetch failed for org=Y` and return empty set (skip this org's tick — do not dispatch on stale assumption).
+6. **Fetch fails** (REST/SQL down) → log `ERROR option fetch failed for org=Y` and return empty set. Existing scheduler empty-modules handling (`tasks.py:318-321` for checklist, `:464-470` for service) advances state with zero children. No rec rows this cycle; next tick retries.
 7. Same flow inherited by `InitializeChecklist`, `InitializeService`, `InitializeArchive` — archive symmetry free.
 8. `Process._execute` (line 530) keeps existing global `disabled_recommendations` defence-in-depth check unchanged. Per-org awareness not added there (would be redundant; dispatch-time filter is authoritative).
 
@@ -162,6 +162,7 @@ Toggle mid-flight = next tick reflects new state. In-flight execution completes 
 `rest_api/rest_api_server/tests/test_organization_options.py` (extend):
 - PATCH `enabled_recommendation_modules` with valid types → 200, persisted as JSON string
 - PATCH unknown module name → 400 with valid-list hint in error message
+- **PATCH on absent option row (first save) with unknown module → 400** (regression guard — validator MUST fire on create path, not just update path)
 - PATCH malformed JSON → 400
 - PATCH wrong shape (e.g. `["foo"]` instead of `{"types": ["foo"]}`) → 400
 - PATCH empty types list → 200 (all-disabled allowed)
