@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import AbandonedImages from "containers/RecommendationsOverviewContainer/recommendations/AbandonedImages";
 import AbandonedInstances from "containers/RecommendationsOverviewContainer/recommendations/AbandonedInstances";
+import AzureAbandonedStorageAccounts from "containers/RecommendationsOverviewContainer/recommendations/AzureAbandonedStorageAccounts";
 import AzureColdTierCandidates from "containers/RecommendationsOverviewContainer/recommendations/AzureColdTierCandidates";
 import AbandonedKinesisStreams from "containers/RecommendationsOverviewContainer/recommendations/AbandonedKinesisStreams";
 import AbandonedLoadBalancers from "containers/RecommendationsOverviewContainer/recommendations/AbandonedLoadBalancers";
@@ -66,6 +67,7 @@ export const useOptscaleRecommendations = ({ withDeprecated = false }: { withDep
       PublicS3Buckets,
       SnapshotsWithNonUsedImages,
       AbandonedImages,
+      AzureAbandonedStorageAccounts,
       AzureColdTierCandidates,
       AzureOrphanNics,
       ...(isNebiusConnectionEnabled ? NEBIUS_RECOMMENDATIONS : []),
