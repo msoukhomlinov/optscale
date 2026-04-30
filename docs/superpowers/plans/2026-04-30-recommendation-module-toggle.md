@@ -406,6 +406,7 @@ from bumiworker.bumiworker.tasks import (
     InitializeChecklist,
     InitializeChildrenBase,
     InitializeService,
+    _UNSET,
 )
 
 
@@ -553,7 +554,7 @@ def test_cache_avoids_double_fetch_per_invocation():
 
 def test_non_recommendations_module_type_unaffected():
     # Gate must only apply to RECOMMENDATION_FOLDER ('recommendations').
-    # Use SERVICE_FOLDER ('services') — a real bumiworker folder, not fictitious.
+    # Use SERVICE_FOLDER ('service') — a real bumiworker folder, not fictitious.
     from bumiworker.bumiworker.tasks import SERVICE_FOLDER
     inst, _ = _make_initialize(
         option_response={'value': json.dumps({'types': ['mod_a']})})
@@ -793,14 +794,28 @@ grep -rn "organization_option\|organizationOption" ngui/ui/src/hooks/ ngui/ui/sr
 
 Identify the existing pattern (Apollo/redux/saga). Read at least one example end-to-end (e.g. `useDisabledRecommendations` if it exists; fall back to grep for `organizationOptions` in actions/api).
 
+- [ ] **Step 1.5: Verify 404 behavior in saga / API layer**
+
+```bash
+grep -rn "GET_ORGANIZATION_OPTION\|organization_option_get\|organizationOptionGet" \
+  ngui/ui/src/api/ ngui/ui/src/sagas/ 2>/dev/null | head -20
+```
+
+Confirm: on 404, does the saga skip the SET action (leaving `apiData` at default) or write a sentinel value? The hook contract depends on this. Match existing `OrganizationOptionsService` behavior exactly.
+
 - [ ] **Step 2: Create hook following identified pattern**
 
-Create `ngui/ui/src/hooks/useRecommendationModulesOption.ts`. The hook MUST mirror whatever existing org-options hook is in use. Pseudocode skeleton (replace with real API calls per identified pattern):
+Create `ngui/ui/src/hooks/useRecommendationModulesOption.ts`. The hook MUST mirror `OrganizationOptionsService` (verified in Step 1 + 1.5).
+
+**Critical implementation notes (verified by round-2 QA against actual codebase):**
+
+- The redux reducer (`reducer.ts`) stores `action.payload.value` directly — a raw JSON **string**, NOT an envelope `{name, value}`. So `useApiData(GET_ORGANIZATION_OPTION)` returns the raw string (e.g. `'{"types":["mod_a"]}'`), not `{value: "..."}`. Do NOT use `apiData?.value` — use `apiData` directly with `parseJSON`.
+- `updateOrganizationOption` already calls `JSON.stringify` on its third argument internally. Pass `{ types }` directly — NOT `{ value: JSON.stringify({ types }) }` (double-stringification corrupts the payload). Verified against `actionCreators.ts:378-389`.
+- `optionRowExists`: 404 leaves `apiData` at the default value (empty string or null per saga behavior confirmed in Step 1.5). Row exists = `apiData` is a non-empty non-default string.
 
 ```ts
-import { useCallback } from "react";
-import { useDispatch, useSelector } from "react-redux";
-// Replace these imports with actual existing action creators / selectors found in Step 1.
+import { useCallback, useMemo } from "react";
+import { useDispatch } from "react-redux";
 import {
   getOrganizationOption,
   updateOrganizationOption,
@@ -809,6 +824,9 @@ import { GET_ORGANIZATION_OPTION } from "api/restapi/actionTypes";
 import { useApiData } from "hooks/useApiData";
 import { useApiState } from "hooks/useApiState";
 import { useOrganizationInfo } from "hooks/useOrganizationInfo";
+
+// parseJSON: use the existing utility (grep for parseJSON in utils/ to confirm path)
+import { parseJSON } from "utils/strings";  // adjust import path per Step 1 discovery
 
 const OPTION_KEY = "enabled_recommendation_modules";
 
@@ -819,19 +837,20 @@ export const useRecommendationModulesOption = () => {
   const { organizationId } = useOrganizationInfo();
 
   const { isLoading } = useApiState(GET_ORGANIZATION_OPTION);
-  const { apiData } = useApiData(GET_ORGANIZATION_OPTION);
+  // rawValue is the JSON string stored by reducer, or null/undefined/default when absent.
+  const { apiData: rawValue } = useApiData(GET_ORGANIZATION_OPTION, null);
 
-  // apiData.value is a JSON string per backend convention.
-  let parsed: EnabledModulesValue | null = null;
-  if (apiData?.value) {
+  // optionRowExists: row present iff API returned a non-empty string (not 404-default).
+  const optionRowExists = typeof rawValue === "string" && rawValue.length > 0 && rawValue !== "{}";
+
+  const parsed = useMemo<EnabledModulesValue | null>(() => {
+    if (!optionRowExists) return null;
     try {
-      parsed = JSON.parse(apiData.value);
+      return parseJSON(rawValue) as EnabledModulesValue;
     } catch {
-      parsed = null;
+      return null;
     }
-  }
-  // Absent option (404) → null. Present → parsed shape.
-  const optionRowExists = parsed !== null;
+  }, [rawValue, optionRowExists]);
 
   const fetchOption = useCallback(() => {
     dispatch(getOrganizationOption(organizationId, OPTION_KEY));
@@ -839,11 +858,8 @@ export const useRecommendationModulesOption = () => {
 
   const updateTypes = useCallback(
     (types: string[]) =>
-      dispatch(
-        updateOrganizationOption(organizationId, OPTION_KEY, {
-          value: JSON.stringify({ types }),
-        })
-      ),
+      // Pass raw object — updateOrganizationOption JSON.stringifies internally.
+      dispatch(updateOrganizationOption(organizationId, OPTION_KEY, { types })),
     [dispatch, organizationId]
   );
 
@@ -857,7 +873,7 @@ export const useRecommendationModulesOption = () => {
 };
 ```
 
-If the existing pattern is GraphQL/Apollo not redux, rewrite accordingly. The contract is: `enabledTypes === null` ⇒ lazy default; `enabledTypes` is array of strings otherwise.
+If the existing pattern differs from redux (e.g. Apollo), rewrite accordingly. The contract is: `enabledTypes === null` ⇒ lazy default; `enabledTypes` is array of strings otherwise. `optionRowExists` must track HTTP 404 (row absent), not parse failure.
 
 - [ ] **Step 3: Verify TypeScript compiles**
 
@@ -1205,7 +1221,7 @@ return orderedRecommendations.map((r) => {
 });
 ```
 
-Add `Chip` to the MUI import line alongside `Badge` removal: `import { Box, Chip, Tooltip } from "@mui/material";`
+Add `Chip` and `Tooltip` to the MUI import line: `import { Box, Chip, Tooltip } from "@mui/material";` (Cards.tsx does not import Badge — nothing to remove).
 
 - [ ] **Step 3: Wire up `disabledModuleTypes` prop in `RecommendationsOverview.tsx`**
 
