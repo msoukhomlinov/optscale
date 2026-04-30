@@ -106,8 +106,30 @@ No commit at this step — verification only.
 ## Task 2: Backend — add `_validate_enabled_modules` helper + dispatch table
 
 **Files:**
+- Modify: `rest_api/Dockerfile`
 - Modify: `rest_api/rest_api_server/controllers/organization_options.py`
 - Test: `rest_api/rest_api_server/tests/unittests/test_organization_options_api.py`
+
+- [ ] **Step 0: Add bumiworker module discovery files to rest_api Docker image**
+
+`rest_api/Dockerfile` does not COPY bumiworker. The validator uses `list_modules('recommendations')` which globs bumiworker's recommendations directory. Add the minimal COPY lines to make the import path resolvable inside the image.
+
+Open `rest_api/Dockerfile` and add after the existing `COPY optscale_client ...` line and before `COPY rest_api/...` lines:
+
+```dockerfile
+COPY bumiworker/__init__.py bumiworker/__init__.py
+COPY bumiworker/bumiworker/__init__.py bumiworker/bumiworker/__init__.py
+COPY bumiworker/bumiworker/modules/__init__.py bumiworker/bumiworker/modules/__init__.py
+COPY bumiworker/bumiworker/modules/module.py bumiworker/bumiworker/modules/module.py
+COPY bumiworker/bumiworker/modules/recommendations bumiworker/bumiworker/modules/recommendations
+```
+
+This copies only the discovery machinery + recommendation module Python files (no bumiworker dependencies installed — `module.py` uses only stdlib).
+
+Verify the `__init__.py` files exist (create empty ones if missing):
+```bash
+ls bumiworker/__init__.py bumiworker/bumiworker/__init__.py bumiworker/bumiworker/modules/__init__.py
+```
 
 - [ ] **Step 1: Write failing test for happy-path validator (create path)**
 
@@ -185,9 +207,35 @@ def test_other_options_unaffected_by_validator(self):
     code, resp = self.client.organization_option_create(
         self.org_id1, 'arbitrary_option_name', arbitrary_value)
     self.assertEqual(code, 200)
+
+def test_enabled_recommendation_modules_patch_requires_edit_partner(self):
+    # Create the option as org admin, then test unauthorized PATCH.
+    valid_value = {'value': json.dumps({'types': []})}
+    with patch(
+        'rest_api.rest_api_server.controllers.organization_options.'
+        'list_recommendation_module_names',
+        return_value=set()
+    ):
+        # This relies on self.client having EDIT_PARTNER role in setUp.
+        # To test 403, create a second client with lower permissions:
+        client_no_perm = self.get_client(
+            user_id=self.org2['id'])  # adjust to match test_api_base pattern
+        code, _ = client_no_perm.organization_option_update(
+            self.org_id1, 'enabled_recommendation_modules', valid_value)
+    self.assertEqual(code, 403)
+
+def test_enabled_recommendation_modules_get_requires_info_organization(self):
+    # GET without INFO_ORGANIZATION returns 403.
+    # Adjust client creation to match existing permission-test patterns in this file.
+    code, _ = self.client.organization_option_get(
+        self.org_id1, 'enabled_recommendation_modules')
+    # With INFO_ORGANIZATION (default test client): 404 (no row) or 200.
+    self.assertIn(code, [200, 404])
 ```
 
-- [ ] **Step 2: Run tests — verify all 7 fail**
+Note: the two permission tests above use test-base patterns — read existing permission tests in this file (e.g. `test_update_locked_by_user_organization_option`) to verify the exact client factory for creating a lower-permission client before implementing. The skeleton is correct in intent; adjust client creation to match the base class API.
+
+- [ ] **Step 2: Run tests — verify all 9 fail**
 
 ```bash
 cd /home/iitadmin/optscale-fork
@@ -200,10 +248,9 @@ Expected: 6 tests FAIL (validator not yet implemented — happy paths fail becau
 
 Edit `rest_api/rest_api_server/controllers/organization_options.py`:
 
-Add these imports near the top with other imports:
+Add this import near the top with other imports (`import json` likely already present):
 
 ```python
-import json
 from bumiworker.bumiworker.modules.module import list_modules
 ```
 
@@ -289,34 +336,17 @@ Modify `OrganizationOptionsController.patch()` to dispatch validator at the very
             return res.value
 ```
 
-Note: `data` here is the validated string (the `value` field unwrapped by the handler before reaching the controller). Verify before commit by adding a one-line `print(repr(data))` and running one test, then remove.
+Note: `data` here is the bare JSON string. Verified: `handlers/v2/organization_options.py` line 195 does `data = self._request_body().get('value')` before passing to `controller.patch()`. No dict-unwrap needed in the validator.
 
-- [ ] **Step 4: Verify validator receives the JSON string (not the dict wrapper)**
-
-```bash
-cd /home/iitadmin/optscale-fork
-grep -n "controller.patch" rest_api/rest_api_server/handlers/v2/organization_options.py
-```
-
-Read the handler around the matched line. Confirm it extracts `value` from the request body and passes it as the `data` arg. If the handler passes the raw dict instead, the validator must unwrap `data['value']` first. Adjust validator's first line accordingly:
-
-```python
-# If handler passes dict {"value": "..."} instead of bare string:
-if isinstance(value_str, dict) and 'value' in value_str:
-    value_str = value_str['value']
-```
-
-Document the actual signature in a one-line comment above the validator.
-
-- [ ] **Step 5: Run tests — verify all 7 pass**
+- [ ] **Step 4: Run tests — verify all 9 pass**
 
 ```bash
 python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_options_api.py -v -k enabled_recommendation_modules
 ```
 
-Expected: all 7 PASS.
+Expected: all 9 PASS.
 
-- [ ] **Step 6: Run full org-options test file — verify no regression**
+- [ ] **Step 5: Run full org-options test file — verify no regression**
 
 ```bash
 python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_options_api.py -v
@@ -327,7 +357,8 @@ Expected: all original tests still PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add rest_api/rest_api_server/controllers/organization_options.py \
+git add rest_api/Dockerfile \
+        rest_api/rest_api_server/controllers/organization_options.py \
         rest_api/rest_api_server/tests/unittests/test_organization_options_api.py
 git commit -m "feat(rest_api): add enabled_recommendation_modules validator with discovery cross-check"
 ```
@@ -387,21 +418,23 @@ def _make_initialize(cls=InitializeChecklist, *, option_response,
     """Build an Initialize* instance with mocked deps.
 
     `option_response`:
-      - dict with 'value' key → simulates present option row
-      - None → simulates absent row (404)
-      - Exception → simulates fetch failure
+      - dict with 'value' key → simulates present option row (200)
+      - None → simulates absent row (404 → raises requests.HTTPError)
+      - Exception subclass instance → simulates non-404 transport failure
     """
+    import requests
     inst = cls.__new__(cls)
-    inst.organization_id = ORG_ID
-    inst._enabled_modules_cache = None
+    inst.body = {'organization_id': ORG_ID}
+    inst._enabled_modules_cache = _UNSET
     inst._stale_warned = set()
 
     mock_rest_cl = MagicMock()
     if isinstance(option_response, Exception):
         mock_rest_cl.organization_option_get.side_effect = option_response
     elif option_response is None:
-        mock_rest_cl.organization_option_get.return_value = (
-            404, {'error': 'not found'})
+        # rest client raises HTTPError for 404 (response.raise_for_status()).
+        http_err = requests.HTTPError(response=MagicMock(status_code=404))
+        mock_rest_cl.organization_option_get.side_effect = http_err
     else:
         mock_rest_cl.organization_option_get.return_value = (
             200, option_response)
@@ -470,9 +503,12 @@ def test_skipped_module_logged_info(caplog):
     assert any('mod_c' in m for m in info_msgs)
 
 
-def test_fetch_failure_returns_empty_and_logs_error(caplog):
-    inst, discovered = _make_initialize(
-        option_response=RuntimeError('rest down'))
+def test_fetch_failure_returns_empty_state_advances(caplog):
+    # Non-404 transport failure → empty list returned; state machine still advances
+    # (existing empty-modules handling at tasks.py:318-321 / :464-470 takes over).
+    import requests
+    non_404_err = requests.HTTPError(response=MagicMock(status_code=503))
+    inst, discovered = _make_initialize(option_response=non_404_err)
     with caplog.at_level(logging.ERROR), \
          patch('bumiworker.bumiworker.tasks.list_modules',
                return_value=list(discovered)):
@@ -516,14 +552,16 @@ def test_cache_avoids_double_fetch_per_invocation():
 
 
 def test_non_recommendations_module_type_unaffected():
-    # Gate must only apply to 'recommendations' module_type.
+    # Gate must only apply to RECOMMENDATION_FOLDER ('recommendations').
+    # Use SERVICE_FOLDER ('services') — a real bumiworker folder, not fictitious.
+    from bumiworker.bumiworker.tasks import SERVICE_FOLDER
     inst, _ = _make_initialize(
         option_response={'value': json.dumps({'types': ['mod_a']})})
     with patch('bumiworker.bumiworker.tasks.list_modules',
-               return_value=['policy_x', 'policy_y']):
-        result = inst.list_modules('policies')
+               return_value=['service_x', 'service_y']):
+        result = inst.list_modules(SERVICE_FOLDER)
     # No filtering applied for non-recommendations.
-    assert set(result) == {'policy_x', 'policy_y'}
+    assert set(result) == {'service_x', 'service_y'}
 ```
 
 - [ ] **Step 3: Run tests — verify all fail**
@@ -543,13 +581,27 @@ Read current `bumiworker/bumiworker/tasks.py:269-310` first to confirm class sha
 sed -n '269,310p' bumiworker/bumiworker/tasks.py
 ```
 
-Modify `InitializeChildrenBase.list_modules` (replace existing method around line 277). Add `import json` and `import logging` at top of file if not already present:
+Modify `InitializeChildrenBase.list_modules` (replace existing method around line 277). Add `import json` and `import logging` at top of file if not already present, and add `import requests`:
 
 ```python
+import json
+import logging
+import requests
+
 LOG = logging.getLogger(__name__)
 ENABLED_MODULES_OPTION_KEY = 'enabled_recommendation_modules'
+```
 
+Add module-level sentinels near the top of `tasks.py` (below imports):
 
+```python
+_UNSET = object()
+_FETCH_FAILED = object()
+```
+
+Add `_fetch_enabled_modules_whitelist` method + replace `list_modules` on `InitializeChildrenBase`:
+
+```python
 class InitializeChildrenBase(CheckTimeoutThreshold):
     # ... existing __init__ unchanged ...
 
@@ -560,24 +612,23 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
             None if option row absent (lazy default → no whitelist enforcement)
             set[str] of whitelisted module names if present
         Raises:
-            propagates underlying exceptions on transport failure
+            requests.HTTPError with status != 404 on transport failure
         """
         if self._enabled_modules_cache is not _UNSET:
+            if self._enabled_modules_cache is _FETCH_FAILED:
+                raise RuntimeError('cached fetch failure')
             return self._enabled_modules_cache
+        org_id = self.body['organization_id']
         try:
-            code, resp = self.rest_cl.organization_option_get(
-                self.organization_id, ENABLED_MODULES_OPTION_KEY)
-        except Exception:
+            _, resp = self.rest_cl.organization_option_get(
+                org_id, ENABLED_MODULES_OPTION_KEY)
+        except requests.HTTPError as exc:
+            if exc.response.status_code == 404:
+                # Absent row → lazy default (all enabled).
+                self._enabled_modules_cache = None
+                return None
             self._enabled_modules_cache = _FETCH_FAILED
             raise
-        if code == 404:
-            self._enabled_modules_cache = None
-            return None
-        if code != 200:
-            self._enabled_modules_cache = _FETCH_FAILED
-            raise RuntimeError(
-                f'unexpected status {code} fetching '
-                f'{ENABLED_MODULES_OPTION_KEY} for org={self.organization_id}')
         parsed = json.loads(resp['value'])
         whitelist = set(parsed.get('types', []))
         self._enabled_modules_cache = whitelist
@@ -585,59 +636,63 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
 
     def list_modules(self, module_type):
         modules = list_modules(module_type)
-        # Existing global filter (preserve verbatim from current line ~280).
-        disabled_globals = set(self.config_cl.disabled_recommendations() or [])
-        after_global = [m for m in modules if m not in disabled_globals]
+        # Preserve existing global filter verbatim (tasks.py:279-282).
+        disabled = set(self.config_cl.disabled_recommendations() or [])
+        filtered = [m for m in modules if m not in disabled]
+        skipped_global = [m for m in modules if m in disabled]
+        LOG.info("[disabled modules] %s::%s", module_type, skipped_global)
 
-        # Per-org gate applies ONLY to recommendation modules.
-        if module_type != 'recommendations':
-            return after_global
+        # Per-org gate: only applies to RECOMMENDATION_FOLDER.
+        if module_type != RECOMMENDATION_FOLDER:
+            return filtered
 
+        org_id = self.body['organization_id']
         try:
             whitelist = self._fetch_enabled_modules_whitelist()
         except Exception as e:
             LOG.error(
                 'option fetch failed for org=%s key=%s: %s',
-                self.organization_id, ENABLED_MODULES_OPTION_KEY, e)
+                org_id, ENABLED_MODULES_OPTION_KEY, e)
             return []
 
         if whitelist is None:
             # Lazy default: absent row → all enabled.
-            return after_global
+            return filtered
 
-        after_global_set = set(after_global)
-        # Stale: in whitelist but not discovered.
+        filtered_set = set(filtered)
+        # Stale: in whitelist but not in discovered modules.
         for stale in whitelist - set(modules):
             if stale not in self._stale_warned:
                 LOG.warning(
                     'module=%s stale (in option, not discovered) for org=%s',
-                    stale, self.organization_id)
+                    stale, org_id)
                 self._stale_warned.add(stale)
-        # Skipped: in discovered ∖ global_disabled but not in whitelist.
-        for skipped in after_global_set - whitelist:
+        # Skipped: discovered and not globally disabled but not in whitelist.
+        for m in filtered_set - whitelist:
             LOG.info(
                 'module=%s skipped (not enabled by org option) for org=%s',
-                skipped, self.organization_id)
-        enabled = after_global_set & whitelist
-        return [m for m in after_global if m in enabled]
+                m, org_id)
+        enabled = filtered_set & whitelist
+        return [m for m in filtered if m in enabled]
 ```
 
-Add module-level sentinels near the top of `tasks.py` (below imports):
+Initialize cache attrs in `InitializeChildrenBase.__init__`. If `__init__` doesn't exist on this class, add it or override it. The base class `__init__` is at the top-level `Task` class which accepts `body` — read `tasks.py:40-50` to identify where `self.body` is set, then add the two sentinel attrs immediately after:
 
 ```python
-_UNSET = object()
-_FETCH_FAILED = object()
-```
-
-Initialize cache attrs in `InitializeChildrenBase.__init__` (or define as class attrs that are overridden per-instance). If `__init__` doesn't exist on this class, find the constructor up the chain and set them in the appropriate place — most likely in the existing constructor where `self.organization_id` is set:
-
-```python
-# Inside the existing __init__ where self.organization_id is set:
+# Immediately after self.body = body (or wherever the parent sets it):
 self._enabled_modules_cache = _UNSET
 self._stale_warned = set()
 ```
 
-Note: the existing `list_modules` may not currently apply `disabled_recommendations` itself — it might be applied elsewhere. Read lines 275-305 carefully and **preserve existing behavior verbatim** in `after_global`. If the existing method just returns `list_modules(module_type)` with no filtering, then `after_global = modules` and the global filter happens elsewhere — adjust accordingly. The spec phrasing `"existing global filter computes discovered \ global_disabled"` implies it lives in `list_modules`; verify by reading the actual code before editing.
+If `InitializeChildrenBase` doesn't override `__init__`, add:
+
+```python
+class InitializeChildrenBase(CheckTimeoutThreshold):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._enabled_modules_cache = _UNSET
+        self._stale_warned = set()
+```
 
 - [ ] **Step 5: Run tests — verify all pass**
 
@@ -831,12 +886,17 @@ git commit -m "feat(ngui): add useRecommendationModulesOption hook"
 
 - [ ] **Step 1: Create the component**
 
+`ConfirmationModal` does not exist in this codebase — `AlertDialog` is single-button only. Use an inline MUI `Dialog` for the "disable all" confirmation.
+
+`BaseRecommendation.constructor` requires `(status: Status, apiResponse: TODO)`. TypeScript will error on `new RecClass()`. Instantiate with dummy args to access the title class field: `new RecClass(STATUS.ACTIVE, {}).title`. Import `STATUS` from `BaseRecommendation`.
+
+`optionRowExists` must track HTTP status (200 vs 404), not JSON parse success — see hook contract from Task 5.
+
 ```tsx
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Stack, Switch, Typography } from "@mui/material";
+import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Switch, Typography } from "@mui/material";
 import { FormattedMessage, useIntl } from "react-intl";
-import ButtonLoader from "components/ButtonLoader";
-import ConfirmationModal from "components/ConfirmationModal";
+import { STATUS } from "containers/RecommendationsOverviewContainer/recommendations/BaseRecommendation";
 import { useOptscaleRecommendations } from "hooks/useOptscaleRecommendations";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 
@@ -863,27 +923,26 @@ const RecommendationModulesSettings = () => {
     [recommendationsByType]
   );
 
-  // Lazy default: absent row → all discovered are "enabled" in UI state.
+  // Lazy default: absent row (optionRowExists=false) → all discovered enabled in UI.
   const effectiveEnabled = useMemo(
     () => new Set(enabledTypes ?? discovered),
     [enabledTypes, discovered]
   );
 
-  // Discovery banner: row exists AND discovered set has modules not in stored.
+  // Discovery banner: row exists AND discovered has modules not in stored types.
+  // enabledTypes is null only when optionRowExists=false (lazy default).
   const newModuleCount = useMemo(() => {
-    if (!optionRowExists || !enabledTypes) return 0;
+    if (!optionRowExists || enabledTypes === null) return 0;
     const stored = new Set(enabledTypes);
     return discovered.filter((t) => !stored.has(t)).length;
   }, [optionRowExists, enabledTypes, discovered]);
 
   const submit = async (nextTypes: string[]) => {
-    const previous = enabledTypes ?? discovered;
     try {
       await updateTypes(nextTypes);
     } catch {
-      // useRecommendationModulesOption surfaces toast via existing error middleware;
-      // optimistic rollback is implicit (next render uses re-fetched state).
-      void previous; // explicit acknowledgement of rollback behaviour
+      // Error toast surfaced by redux error middleware in useRecommendationModulesOption.
+      // Next render re-fetches and reverts optimistic state.
     }
   };
 
@@ -923,7 +982,8 @@ const RecommendationModulesSettings = () => {
       <Box>
         {discovered.map((type) => {
           const RecClass = recommendationsByType[type];
-          const titleKey = new RecClass().title;
+          // BaseRecommendation.title is a class field; needs dummy constructor args for TypeScript.
+          const titleKey = new RecClass(STATUS.ACTIVE, {}).title;
           return (
             <Box
               key={type}
@@ -939,9 +999,7 @@ const RecommendationModulesSettings = () => {
                 checked={effectiveEnabled.has(type)}
                 onChange={(_, checked) => handleToggle(type, checked)}
                 inputProps={{
-                  "aria-label": intl.formatMessage(
-                    { id: "recommendationModules" }
-                  ),
+                  "aria-label": intl.formatMessage({ id: "recommendationModules" }),
                 }}
                 data-test-id={`switch_${type}`}
               />
@@ -949,26 +1007,45 @@ const RecommendationModulesSettings = () => {
           );
         })}
       </Box>
-      <ConfirmationModal
-        open={confirmEmptyOpen}
-        title={<FormattedMessage id="recommendationModuleDisableAllConfirmTitle" />}
-        body={<FormattedMessage id="recommendationModuleDisableAllConfirmBody" />}
-        onConfirm={() => {
-          if (pendingTypes !== null) submit(pendingTypes);
-          setConfirmEmptyOpen(false);
-          setPendingTypes(null);
-        }}
-        onCancel={() => {
-          setConfirmEmptyOpen(false);
-          setPendingTypes(null);
-        }}
-      />
+
+      {/* Inline confirm dialog — no ConfirmationModal component in this codebase. */}
+      <Dialog open={confirmEmptyOpen} onClose={() => setConfirmEmptyOpen(false)}>
+        <DialogTitle>
+          <FormattedMessage id="recommendationModuleDisableAllConfirmTitle" />
+        </DialogTitle>
+        <DialogContent>
+          <FormattedMessage id="recommendationModuleDisableAllConfirmBody" />
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setConfirmEmptyOpen(false);
+              setPendingTypes(null);
+            }}
+          >
+            <FormattedMessage id="cancel" />
+          </Button>
+          <Button
+            variant="contained"
+            color="error"
+            onClick={() => {
+              if (pendingTypes !== null) submit(pendingTypes);
+              setConfirmEmptyOpen(false);
+              setPendingTypes(null);
+            }}
+          >
+            <FormattedMessage id="confirm" />
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 };
 
 export default RecommendationModulesSettings;
 ```
+
+Note: verify `"cancel"` and `"confirm"` i18n keys exist in `app.json`. If not, add them to the i18n task (Task 4 Step 2) or use the existing equivalent keys found by `grep -n '"cancel"\|"confirm"' ngui/ui/src/translations/en-US/app.json`.
 
 - [ ] **Step 2: Create barrel export**
 
@@ -978,13 +1055,13 @@ import RecommendationModulesSettings from "./RecommendationModulesSettings";
 export default RecommendationModulesSettings;
 ```
 
-- [ ] **Step 3: Verify ConfirmationModal API matches**
+- [ ] **Step 3: Verify i18n key names**
 
 ```bash
-grep -rn "ConfirmationModal" ngui/ui/src/components/ConfirmationModal/ | head -10
+grep -n '"cancel"\|"confirm"' ngui/ui/src/translations/en-US/app.json | head -5
 ```
 
-Read the actual `ConfirmationModal` props signature. Adjust the JSX in Step 1 to match exactly (prop names may be `onClose`/`onSubmit`/`message` instead of `onConfirm`/`onCancel`/`body`). If a different confirm-modal component is canonical, swap to it.
+If keys differ (e.g. `"Cancel"` not `"cancel"`), update the Dialog button `id` props to match.
 
 - [ ] **Step 4: Type-check**
 
@@ -1082,50 +1159,53 @@ type CardsProps = {
 };
 ```
 
-Replace the final `return orderedRecommendations.map(...)` block. For each `r`, if `disabledModuleTypes.has(r.type)`, render a wrapper that greys the card and adds badge + tooltip. Reuse the existing `<RecommendationCard>` invocation; do not duplicate its body. Concretely, wrap the existing card in a disabled-state container:
+Replace the final `return orderedRecommendations.map(...)` block. For each `r`, if `disabledModuleTypes.has(r.type)`, render a wrapper that greys the card and adds a "Disabled" chip label + tooltip. Do NOT use `<Badge>` — it requires a child element to badge; use a `<Chip>` label overlaid absolutely instead. Do NOT apply `pointerEvents: "none"` to the Tooltip's direct child — MUI Tooltip won't fire on a `pointer-events: none` element. Use a hoverable wrapper span around the greyed card body.
 
 ```tsx
 return orderedRecommendations.map((r) => {
   const isDisabled = disabledModuleTypes.has(r.type);
+  // Copy existing RecommendationCard props verbatim from the current map block.
   const card = (
     <RecommendationCard
       key={r.type}
       color={r.color}
-      // ... preserve existing props verbatim ...
+      // ... preserve existing header/description/cta/menu/children props verbatim ...
     />
   );
   if (!isDisabled) return card;
   return (
-    <Tooltip
-      key={r.type}
-      title={
-        <>
-          <FormattedMessage id="recommendationModuleDisabledTooltip" />{" "}
-          <MuiLink
-            component={RouterLink}
-            to={`/settings?tab=${SETTINGS_TABS.RECOMMENDATION_MODULES}`}
-          >
-            <FormattedMessage id="recommendationModuleDisabledTooltipLink" />
-          </MuiLink>
-        </>
-      }
-    >
-      <Box sx={{ opacity: 0.5, pointerEvents: "none", position: "relative" }}>
-        <Badge
-          color="default"
-          badgeContent={
-            <FormattedMessage id="recommendationModuleDisabledBadge" />
-          }
-          sx={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}
-        />
-        {card}
-      </Box>
-    </Tooltip>
+    <Box key={r.type} sx={{ position: "relative" }}>
+      {/* Hoverable span so Tooltip fires even on greyed content. */}
+      <Tooltip
+        title={
+          <>
+            <FormattedMessage id="recommendationModuleDisabledTooltip" />{" "}
+            <MuiLink
+              component={RouterLink}
+              to={`/settings?tab=${SETTINGS_TABS.RECOMMENDATION_MODULES}`}
+            >
+              <FormattedMessage id="recommendationModuleDisabledTooltipLink" />
+            </MuiLink>
+          </>
+        }
+      >
+        <span style={{ display: "block" }}>
+          <Box sx={{ opacity: 0.5 }}>
+            {card}
+          </Box>
+        </span>
+      </Tooltip>
+      <Chip
+        label={<FormattedMessage id="recommendationModuleDisabledBadge" />}
+        size="small"
+        sx={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}
+      />
+    </Box>
   );
 });
 ```
 
-Note: spec calls for `pointerEvents: "none"` on the disabled card body but the tooltip wrapper must remain interactive — wrap it carefully. If the existing layout breaks, drop pointerEvents disabling and rely on visual greying only.
+Add `Chip` to the MUI import line alongside `Badge` removal: `import { Box, Chip, Tooltip } from "@mui/material";`
 
 - [ ] **Step 3: Wire up `disabledModuleTypes` prop in `RecommendationsOverview.tsx`**
 
@@ -1181,7 +1261,7 @@ git commit -m "feat(ngui): render disabled-state tile for whitelisted-out recomm
 **Files:**
 - None directly. Build + deploy commands.
 
-- [ ] **Step 1: Build rest_api image**
+- [ ] **Step 1: Build rest_api image and verify bumiworker import resolves inside container**
 
 ```bash
 export KUBECONFIG=/home/iitadmin/.kube/config
@@ -1191,6 +1271,15 @@ sudo nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io \
 ```
 
 Expected: build succeeds.
+
+Verify the import path resolves in the image (catches Dockerfile COPY omission):
+```bash
+sudo nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io \
+  run --rm rest_api:local python3 -c \
+  "from bumiworker.bumiworker.modules.module import list_modules; print(list_modules('recommendations'))"
+```
+
+Expected: prints a list of recommendation module names. If ImportError: re-check the Dockerfile COPY lines added in Task 2 Step 0.
 
 - [ ] **Step 2: Build bumiworker image**
 
