@@ -300,7 +300,7 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         """
         if self._enabled_modules_cache is not _UNSET:
             if self._enabled_modules_cache is _FETCH_FAILED:
-                raise RuntimeError('cached fetch failure')
+                raise requests.HTTPError('cached fetch failure')
             return self._enabled_modules_cache
         org_id = self.body['organization_id']
         try:
