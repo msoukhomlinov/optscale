@@ -317,7 +317,28 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
             self._enabled_modules_cache = _FETCH_FAILED
             self._fetch_failed_exc = exc
             raise
-        whitelist = set(parsed.get('types', []))
+        # Shape-validate: must be {"types": [str, ...]}. A malformed-but-
+        # valid JSON like {"types": "obsolete_ips"} would otherwise be
+        # iterated by set(...) into a character set, causing list_modules
+        # to treat every real module as disabled and silently suppress all
+        # recommendations for the org.
+        if not isinstance(parsed, dict):
+            exc = ValueError(
+                'enabled_recommendation_modules: expected JSON object, '
+                f'got {type(parsed).__name__}')
+            self._enabled_modules_cache = _FETCH_FAILED
+            self._fetch_failed_exc = exc
+            raise exc
+        types = parsed.get('types', [])
+        if not isinstance(types, list) or not all(
+                isinstance(t, str) for t in types):
+            exc = ValueError(
+                'enabled_recommendation_modules: expected types to be '
+                f'list[str], got {type(types).__name__}')
+            self._enabled_modules_cache = _FETCH_FAILED
+            self._fetch_failed_exc = exc
+            raise exc
+        whitelist = set(types)
         self._enabled_modules_cache = whitelist
         return whitelist
 
