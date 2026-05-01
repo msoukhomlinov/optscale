@@ -1859,7 +1859,7 @@
   "recommendationModuleApiCallsPricingLink": "Vendor pricing page",
   "recommendationModuleApiCallsNote": "Some modules call cloud provider APIs directly at scan time, which may incur charges. Cost estimates shown are approximate — accuracy is not guaranteed, and vendors may change their pricing at any time.",
   "recommendationModuleUnknownModule": "Unknown module name",
-  "recommendationModuleDiscoveryFailed": "Failed to load the list of available recommendation modules. Toggling is disabled until this succeeds — saving without it could silently disable hidden modules.",
+  "recommendationModuleFetchFailed": "Failed to load the recommendation module settings. Toggling is disabled until this succeeds — saving with stale or incomplete data could overwrite the organization's module whitelist.",
   "recommendationModules": "Recommendation Modules",
   "recommendationProceeding": "The data has not been processed yet. Please wait until the recommendations check is fully completed.",
   "recommendationSettings": "{recommendationName} recommendation settings",

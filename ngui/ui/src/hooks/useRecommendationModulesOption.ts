@@ -22,7 +22,7 @@ export const useRecommendationModulesOption = () => {
   const dispatch = useDispatch();
   const { organizationId } = useOrganizationInfo();
 
-  const { isLoading } = useApiState(GET_ORGANIZATION_OPTION);
+  const { isLoading, isError: isOptionError } = useApiState(GET_ORGANIZATION_OPTION);
   const { apiData: rawValue } = useApiData(GET_ORGANIZATION_OPTION, "{}");
 
   // Backend's currently-discovered recommendation module names. The validator
@@ -64,10 +64,14 @@ export const useRecommendationModulesOption = () => {
   useEffect(() => {
     if (isLoading) {
       wasLoadingRef.current = true;
-    } else if (wasLoadingRef.current) {
+    } else if (wasLoadingRef.current && !isOptionError) {
+      // Only flip on a successful load. On error, leave hasFetchedOption
+      // false so toggles stay blocked — rawValue would still be the stale
+      // default ("{}") and a save could overwrite the real org setting
+      // with a whitelist reconstructed from incomplete data.
       setHasFetchedOption(true);
     }
-  }, [isLoading]);
+  }, [isLoading, isOptionError]);
   useEffect(() => {
     if (isLoadingDiscovered) {
       wasDiscoveryLoadingRef.current = true;
@@ -118,7 +122,7 @@ export const useRecommendationModulesOption = () => {
   return {
     isLoading,
     hasFetched,
-    discoveryFailed: isDiscoveredError && !isLoadingDiscovered,
+    fetchFailed: (isOptionError && !isLoading) || (isDiscoveredError && !isLoadingDiscovered),
     optionRowExists,
     enabledTypes: parsed?.types ?? null,
     discoveredBackend,

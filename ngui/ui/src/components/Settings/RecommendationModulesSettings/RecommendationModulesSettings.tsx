@@ -41,7 +41,7 @@ const RecommendationModulesSettings = () => {
   const recommendationsByType = useOptscaleRecommendations();
   const {
     hasFetched,
-    discoveryFailed,
+    fetchFailed,
     enabledTypes,
     discoveredBackend,
     fetchOption,
@@ -141,11 +141,13 @@ const RecommendationModulesSettings = () => {
     submit([...passThrough, ...visibleSelected].sort());
   };
 
-  if (discoveryFailed) {
-    // Block the toggle UI entirely if backend module discovery failed: the
-    // empty default would let `passThrough` silently drop every hidden
-    // module type from a stored whitelist on the next toggle. Surface the
-    // error and offer a retry instead.
+  if (fetchFailed) {
+    // Block the toggle UI entirely if either the option row OR backend module
+    // discovery failed to load. The empty/stale default would let `passThrough`
+    // silently drop every hidden module type from a stored whitelist on the
+    // next toggle (or overwrite the real setting with a whitelist
+    // reconstructed from incomplete data). Surface the error and offer a
+    // retry instead.
     return (
       <Stack spacing={2}>
         <Alert
@@ -157,7 +159,7 @@ const RecommendationModulesSettings = () => {
             </Button>
           }
         >
-          <FormattedMessage id="recommendationModuleDiscoveryFailed" />
+          <FormattedMessage id="recommendationModuleFetchFailed" />
         </Alert>
       </Stack>
     );
