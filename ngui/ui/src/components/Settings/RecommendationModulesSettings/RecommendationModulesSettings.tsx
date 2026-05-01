@@ -96,9 +96,24 @@ const RecommendationModulesSettings = () => {
     [recommendationsByType]
   );
 
+  // Backend-discovered modules this UI build does not have a class for —
+  // typically a rolling-upgrade case where the deployed backend is newer
+  // than this UI bundle. They are rendered as bare rows (type name only)
+  // so operators can still toggle them per-module from Settings instead
+  // of being limited to passthrough preserve-or-drop behavior.
+  const backendOnlyTypes = useMemo(() => {
+    const discoveredSet = new Set(discovered);
+    return Array.from(discoveredBackend).filter((t) => !discoveredSet.has(t)).sort();
+  }, [discovered, discoveredBackend]);
+
+  const allRenderedTypes = useMemo(
+    () => [...discovered, ...backendOnlyTypes],
+    [discovered, backendOnlyTypes]
+  );
+
   const effectiveEnabled = useMemo(
-    () => optimisticEnabled ?? new Set(enabledTypes ?? discovered),
-    [optimisticEnabled, enabledTypes, discovered]
+    () => optimisticEnabled ?? new Set(enabledTypes ?? allRenderedTypes),
+    [optimisticEnabled, enabledTypes, allRenderedTypes]
   );
 
   const submit = (nextTypes: string[]) => {
@@ -113,31 +128,21 @@ const RecommendationModulesSettings = () => {
     if (nextOn) next.add(type);
     else next.delete(type);
     setOptimisticEnabled(next);
-    const discoveredSet = new Set(discovered);
-    // Pass-through = stored types this UI doesn't render but the backend
-    // currently knows about. Filtering against `discoveredBackend` (fetched
-    // from the new GET /recommendation_modules endpoint) drops:
-    //   - stale names from renamed/removed modules so a strict validator
-    //     (OE0217) doesn't bounce every save and lock the toggle out;
-    // and preserves:
-    //   - hidden-but-valid modules (eg Nebius types when no Nebius
-    //     connection exists) across rolling upgrades / version skew where the
-    //     backend knows recommendation types this UI does not render.
-    // When no option row exists (enabledTypes null) seed from the same
-    // backend-known set minus what this UI renders, so the first save
-    // materialises the implicit "all enabled" default without silently
-    // disabling hidden modules.
+    // The "rendered" set spans frontend-known modules + any backend-only
+    // modules we render as bare rows. Pass-through = stored types not
+    // currently rendered, intersected with `discoveredBackend` to drop
+    // stale rename/removal names that the strict OE0217 validator would
+    // otherwise reject on every save.
+    const renderedSet = new Set(allRenderedTypes);
     const passThrough = enabledTypes === null
-      ? Array.from(discoveredBackend).filter((t) => !discoveredSet.has(t))
-      : enabledTypes.filter((t) => !discoveredSet.has(t) && discoveredBackend.has(t));
-    // Also intersect the visible selection with `discoveredBackend` — when
-    // the UI is newer than the backend (rolling-upgrade skew), this UI may
-    // render module tiles for types the deployed backend does not yet know
-    // about. Submitting them would trip the OE0217 validator and lock all
-    // saves until versions align. Drop unknowns; the toggle still appears
-    // checked but is excluded from the persisted whitelist.
+      ? Array.from(discoveredBackend).filter((t) => !renderedSet.has(t))
+      : enabledTypes.filter((t) => !renderedSet.has(t) && discoveredBackend.has(t));
+    // Submitted selection: intersect with `discoveredBackend` so a UI that
+    // ships tiles for module types the deployed backend does not yet know
+    // about (rolling-upgrade skew where the UI is newer) does not trip
+    // OE0217. Backend-only rows already pass this check by definition.
     const visibleSelected = Array.from(next).filter(
-      (t) => discoveredSet.has(t) && discoveredBackend.has(t)
+      (t) => renderedSet.has(t) && discoveredBackend.has(t)
     );
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,
@@ -208,6 +213,8 @@ const RecommendationModulesSettings = () => {
               .filter(Boolean);
             const apiCallInfo: { description: string; volume: string; cost: string; pricingUrl: string } | null =
               instance.apiCallInfo ?? null;
+            // Note: backend-only rows are rendered separately below; this
+            // branch is the frontend-known module list.
 
             return (
               <TableRow key={type}>
@@ -257,6 +264,37 @@ const RecommendationModulesSettings = () => {
               </TableRow>
             );
           })}
+          {backendOnlyTypes.map((type) => (
+            // Backend-discovered module without a UI class in this build —
+            // render a bare row so operators can still toggle it. No cloud
+            // chips / API-cost description (this UI build doesn't have the
+            // metadata for these types yet).
+            <TableRow key={type}>
+              <TableCell>
+                <Stack spacing={0.25}>
+                  <Typography variant="body2">{type}</Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    <FormattedMessage id="recommendationModuleBackendOnlyHint" />
+                  </Typography>
+                </Stack>
+              </TableCell>
+              <TableCell>
+                <Typography variant="body2" color="text.secondary">—</Typography>
+              </TableCell>
+              <TableCell>
+                <Typography variant="body2" color="text.secondary">—</Typography>
+              </TableCell>
+              <TableCell align="right">
+                <Switch
+                  checked={effectiveEnabled.has(type)}
+                  onChange={(_, checked) => handleToggle(type, checked)}
+                  disabled={!isEditAllowed}
+                  inputProps={{ "aria-label": type }}
+                  data-test-id={`switch_${type}`}
+                />
+              </TableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
 
