@@ -2,6 +2,7 @@ import { useSearchParams } from "react-router-dom";
 import ActionBar from "components/ActionBar";
 import BillingSubscription from "components/BillingSubscription";
 import OrganizationSettings from "components/OrganizationSettings";
+import RecommendationModulesSettings from "components/Settings/RecommendationModulesSettings";
 import PageContentWrapper from "components/PageContentWrapper";
 import TabsWrapper from "components/TabsWrapper";
 import InvitationsContainer from "containers/InvitationsContainer";
@@ -62,6 +63,11 @@ const Settings = () => {
       title: SETTINGS_TABS.EMAIL_NOTIFICATIONS,
       dataTestId: `tab_${SETTINGS_TABS.EMAIL_NOTIFICATIONS}`,
       node: <UserEmailNotificationSettingsContainer />,
+    },
+    {
+      title: SETTINGS_TABS.RECOMMENDATION_MODULES,
+      dataTestId: `tab_${SETTINGS_TABS.RECOMMENDATION_MODULES}`,
+      node: <RecommendationModulesSettings />,
     },
   ];
 
