@@ -47,6 +47,12 @@ class AuthHierarchyController(object):
         if not type:
             raise WrongArgumentsException(Err.OE0216, ['type'])
         if type == 'root':
+            # Root lookups must not carry a scope_id — auth's root assignment
+            # has resource_id=None, so any explicit scope on the request is
+            # malformed and should fail fast rather than silently expand to
+            # the full organization+pool tree.
+            if scope_id is not None:
+                raise WrongArgumentsException(Err.OE0212, ['scope_id'])
             return self._auth_hierarchy_root()
         if not scope_id:
             raise WrongArgumentsException(Err.OE0216, ['scope_id'])

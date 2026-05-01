@@ -36,8 +36,7 @@ const RecommendationModulesSettings = () => {
   const isEditAllowed = useIsAllowed({ requiredActions: ["EDIT_PARTNER"] });
   const recommendationsByType = useOptscaleRecommendations();
   const {
-    isLoading,
-    optionRowExists,
+    hasFetched,
     enabledTypes,
     fetchOption,
     updateTypes,
@@ -98,7 +97,7 @@ const RecommendationModulesSettings = () => {
     submit([...passThrough, ...visibleSelected].sort());
   };
 
-  if (isLoading && !optionRowExists) {
+  if (!hasFetched) {
     return <Typography><FormattedMessage id="loading" /></Typography>;
   }
 

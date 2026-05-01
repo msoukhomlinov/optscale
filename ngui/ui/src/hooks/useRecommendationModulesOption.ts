@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDispatch } from "react-redux";
 import {
   getOrganizationOption,
@@ -20,6 +20,20 @@ export const useRecommendationModulesOption = () => {
 
   const { isLoading } = useApiState(GET_ORGANIZATION_OPTION);
   const { apiData: rawValue } = useApiData(GET_ORGANIZATION_OPTION, "{}");
+
+  // hasFetched flips true after the first GET_ORGANIZATION_OPTION resolves.
+  // Before that, rawValue still holds its default "{}" placeholder, which is
+  // indistinguishable from "no row exists" — callers must not act on the
+  // derived enabledTypes (and certainly not submit toggles) until this is true.
+  const wasLoadingRef = useRef(false);
+  const [hasFetched, setHasFetched] = useState(false);
+  useEffect(() => {
+    if (isLoading) {
+      wasLoadingRef.current = true;
+    } else if (wasLoadingRef.current) {
+      setHasFetched(true);
+    }
+  }, [isLoading]);
 
   const optionRowExists = typeof rawValue === "string" && rawValue.length > 0 && rawValue !== "{}";
 
@@ -46,6 +60,7 @@ export const useRecommendationModulesOption = () => {
 
   return {
     isLoading,
+    hasFetched,
     optionRowExists,
     enabledTypes: parsed?.types ?? null,
     fetchOption,
