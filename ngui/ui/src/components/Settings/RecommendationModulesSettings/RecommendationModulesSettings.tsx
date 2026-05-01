@@ -72,7 +72,9 @@ const RecommendationModulesSettings = () => {
     return discovered.filter((t) => !stored.has(t)).length;
   }, [optionRowExists, enabledTypes, discovered]);
 
-  const submit = (nextTypes: string[]) => updateTypes(nextTypes);
+  const submit = (nextTypes: string[]) => {
+    (updateTypes(nextTypes) as Promise<unknown>).catch(() => setOptimisticEnabled(null));
+  };
 
   const handleToggle = (type: string, nextOn: boolean) => {
     const next = new Set(effectiveEnabled);
