@@ -1856,6 +1856,7 @@
   "recommendationModuleColApiCalls": "API calls (billable)",
   "recommendationModuleColEnabled": "Enabled",
   "recommendationModuleApiCallsCachedOnly": "—",
+  "recommendationModuleApiCallsPricingLink": "Vendor pricing page",
   "recommendationModuleApiCallsNote": "Some modules call cloud provider APIs directly at scan time, which may incur charges. Cost estimates shown are approximate — accuracy is not guaranteed, and vendors may change their pricing at any time.",
   "recommendationModuleUnknownModule": "Unknown module name",
   "recommendationModules": "Recommendation Modules",

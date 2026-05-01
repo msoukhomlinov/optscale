@@ -120,7 +120,8 @@ const RecommendationModulesSettings = () => {
             const clouds: string[] = (instance.appliedDataSources ?? [])
               .map((src: string) => CLOUD_LABEL[src])
               .filter(Boolean);
-            const apiCallInfo: string | null = instance.apiCallInfo ?? null;
+            const apiCallInfo: { description: string; volume: string; cost: string; pricingUrl: string } | null =
+              instance.apiCallInfo ?? null;
 
             return (
               <TableRow key={type}>
@@ -136,12 +137,25 @@ const RecommendationModulesSettings = () => {
                   </Box>
                 </TableCell>
                 <TableCell>
-                  {apiCallInfo
-                    ? <Typography variant="body2">{apiCallInfo}</Typography>
-                    : <Typography variant="body2" color="text.secondary">
-                        <FormattedMessage id="recommendationModuleApiCallsCachedOnly" />
+                  {apiCallInfo ? (
+                    <Stack spacing={0.25}>
+                      <Typography variant="body2">
+                        {apiCallInfo.description} &middot; {apiCallInfo.volume}
                       </Typography>
-                  }
+                      <Typography variant="body2" color="text.secondary">
+                        {apiCallInfo.cost}
+                      </Typography>
+                      <Typography variant="body2">
+                        <a href={apiCallInfo.pricingUrl} target="_blank" rel="noopener noreferrer">
+                          <FormattedMessage id="recommendationModuleApiCallsPricingLink" />
+                        </a>
+                      </Typography>
+                    </Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      <FormattedMessage id="recommendationModuleApiCallsCachedOnly" />
+                    </Typography>
+                  )}
                 </TableCell>
                 <TableCell align="right">
                   <Switch

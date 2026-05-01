@@ -178,10 +178,14 @@ class BaseRecommendation {
 
   withCleanupScripts = false;
 
-  // Human-readable description of extra cloud API calls made during each module run.
-  // null = module reads cached MongoDB data only (no additional cloud API calls).
-  // Set to a short string on modules that call cloud APIs at scan time (e.g. "~2 Monitor reads/account/run").
-  apiCallInfo: string | null = null;
+  // Describes extra cloud API calls made at scan time (beyond the regular sync).
+  // null = reads cached MongoDB data only; no direct cloud API calls.
+  apiCallInfo: {
+    description: string; // what is called, e.g. "AWS CloudWatch GetMetricStatistics"
+    volume: string;      // approximate volume per run, e.g. "~1 call/bucket/run"
+    cost: string;        // vendor-published rate, e.g. "$0.01/1 000 calls after 1M free/mo"
+    pricingUrl: string;  // canonical vendor pricing page URL
+  } | null = null;
 
   static getResourceDescriptionMessageValues() {}
 
