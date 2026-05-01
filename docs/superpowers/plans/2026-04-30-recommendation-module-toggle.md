@@ -408,6 +408,7 @@ def _make_initialize(cls=InitializeChecklist, *, option_response,
     inst.body = {'organization_id': ORG_ID}
     inst._enabled_modules_cache = _UNSET
     inst._stale_warned = set()
+    inst._fetch_error_logged = False
 
     mock_rest_cl = MagicMock()
     if isinstance(option_response, Exception):
@@ -1216,14 +1217,17 @@ Add `Chip` and `Tooltip` to the MUI import line: `import { Box, Chip, Tooltip } 
 
 - [ ] **Step 3: Wire up `disabledModuleTypes` prop in `RecommendationsOverview.tsx`**
 
-Read `ngui/ui/src/containers/RecommendationsOverviewContainer/RecommendationsOverview.tsx`. The file has NO React imports — `useMemo` must be added explicitly.
+Read `ngui/ui/src/containers/RecommendationsOverviewContainer/RecommendationsOverview.tsx`. The file has NO React imports — `useMemo` and `useEffect` must be added explicitly.
+
+**Critical:** `RecommendationsOverview` must fetch the option itself. Without this, users who navigate directly to the Recommendations Overview (without first visiting Settings) will see all tiles as enabled even if the org has disabled modules — `enabledTypes` stays `null` (lazy default) because nothing dispatched `getOrganizationOption`.
 
 ```tsx
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 
 // inside the component:
-const { enabledTypes, optionRowExists } = useRecommendationModulesOption();
+const { enabledTypes, optionRowExists, fetchOption } = useRecommendationModulesOption();
+useEffect(() => { fetchOption(); }, [fetchOption]);
 const disabledModuleTypes = useMemo<ReadonlySet<string>>(() => {
   // Lazy default: pre-first-save → no row → all enabled → empty disabled set.
   if (!optionRowExists || !enabledTypes) return new Set();
