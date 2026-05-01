@@ -19,7 +19,7 @@ type CardsProps = {
   isDownloadAvailable: boolean;
   isGetIsDownloadAvailableLoading: boolean;
   selectedDataSourceIds: string[];
-  disabledModuleTypes: ReadonlySet<string>;
+  disabledModuleTypes?: ReadonlySet<string>;
 };
 
 const useOrderedRecommendations = (recommendations: BaseRecommendation[]) => {
@@ -46,7 +46,7 @@ const Cards = ({
   isDownloadAvailable,
   isGetIsDownloadAvailableLoading,
   selectedDataSourceIds,
-  disabledModuleTypes,
+  disabledModuleTypes = new Set(),
 }: CardsProps) => {
   const orderedRecommendations = useOrderedRecommendations(recommendations);
 
