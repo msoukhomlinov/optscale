@@ -101,15 +101,27 @@ const RecommendationsOverview = ({
     [recommendationClasses, recommendationsData, category, service, search, selectedDataSourceTypes]
   );
 
-  const { enabledTypes, optionRowExists, hasFetched, fetchOption } = useRecommendationModulesOption();
+  const {
+    enabledTypes,
+    optionRowExists,
+    hasFetchedOption,
+    optionFailed,
+    fetchOption,
+  } = useRecommendationModulesOption();
   useEffect(() => { fetchOption(); }, [fetchOption]);
   const disabledModuleTypes = useMemo<ReadonlySet<string>>(() => {
-    // Until the option fetch resolves, return empty so the overview does
-    // not flash modules as disabled based on stale store data — but pair
-    // this with `hasFetched` gating downstream so cards/table do not let
-    // the user act on a recommendation before we know whether it is
-    // actually enabled.
-    if (!hasFetched) return new Set<string>();
+    // Read-only computation: gate on the option fetch only (the discovery
+    // endpoint is only needed by the settings writer). Until the option
+    // fetch resolves, return empty so the overview does not flash modules
+    // as disabled based on stale store data — Cards/Table receive the
+    // matching isLoading flag below so a user cannot click into a module
+    // before we know whether it is enabled.
+    // On option-fetch failure (transient 5xx, network drop), degrade
+    // gracefully: treat all modules as enabled rather than locking the
+    // entire recommendations page in a perpetual loader; surface a
+    // dismissible warning banner so the user knows they may be acting on
+    // stale disable-state.
+    if (!hasFetchedOption) return new Set<string>();
     if (!optionRowExists || !enabledTypes) return new Set<string>();
     const enabled = new Set(enabledTypes);
     return new Set(
@@ -117,10 +129,24 @@ const RecommendationsOverview = ({
         .map((r: BaseRecommendation) => r.type)
         .filter((t: string) => !enabled.has(t))
     );
-  }, [hasFetched, optionRowExists, enabledTypes, recommendations]);
+  }, [hasFetchedOption, optionRowExists, enabledTypes, recommendations]);
+
+  // The overview can still render recommendations when the option fetch
+  // has not finished yet, but only after it has either succeeded OR
+  // explicitly failed — otherwise we would briefly let users click into
+  // a module that is actually disabled.
+  const moduleStateResolved = hasFetchedOption || optionFailed;
 
   return (
     <Stack spacing={SPACING_2}>
+      {optionFailed && (
+        <div>
+          <InlineSeverityAlert
+            severity="warning"
+            messageId="recommendationModuleStateUnavailable"
+          />
+        </div>
+      )}
       <div>
         <Summary
           totalSaving={totalSaving}
@@ -157,7 +183,7 @@ const RecommendationsOverview = ({
               <Box className={classes.cardsGrid}>
                 <Cards
                   recommendations={recommendations}
-                  isLoading={!isDataReady || !hasFetched}
+                  isLoading={!isDataReady || !moduleStateResolved}
                   downloadLimit={downloadLimit}
                   onRecommendationClick={onRecommendationClick}
                   isDownloadAvailable={isDownloadAvailable}
@@ -170,7 +196,7 @@ const RecommendationsOverview = ({
             {view === VIEW_TABLE && (
               <RecommendationsTable
                 recommendations={recommendations}
-                isLoading={!isDataReady || !hasFetched}
+                isLoading={!isDataReady || !moduleStateResolved}
                 downloadLimit={downloadLimit}
                 onRecommendationClick={onRecommendationClick}
                 isDownloadAvailable={isDownloadAvailable}

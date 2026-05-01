@@ -141,6 +141,14 @@ export const useRecommendationModulesOption = () => {
   return {
     isLoading,
     hasFetched,
+    // Read-only consumers (eg the recommendations overview) only need the
+    // option row to compute "is this module disabled?" and don't have to
+    // wait for discovery — exposing the option-only flag separately lets
+    // them render without blocking on the discovery endpoint, which may
+    // 404 on a rolling deploy or fail transiently.
+    hasFetchedOption,
+    optionFailed: isOptionError && !isLoading,
+    discoveryFailed: isDiscoveredError && !isLoadingDiscovered,
     fetchFailed: (isOptionError && !isLoading) || (isDiscoveredError && !isLoadingDiscovered),
     optionRowExists,
     enabledTypes: parsed?.types ?? null,
