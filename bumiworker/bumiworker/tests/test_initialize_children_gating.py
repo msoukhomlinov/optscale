@@ -159,10 +159,38 @@ def test_cache_avoids_double_fetch_per_invocation():
         option_response={'value': json.dumps({'types': ['mod_a']})})
     with patch('bumiworker.bumiworker.tasks.list_modules',
                return_value=list(discovered)):
-        inst.list_modules('recommendations')
-        # Call again on same instance — cache should be hit, no second REST call.
-        inst.list_modules('recommendations')
+        result1 = inst.list_modules('recommendations')
+        # Cache hit: no second REST call and result is consistent.
+        result2 = inst.list_modules('recommendations')
     assert inst.rest_cl.organization_option_get.call_count == 1
+    assert set(result1) == set(result2) == {'mod_a'}
+
+
+def test_fetch_failed_sentinel_reused_no_second_rest_call(caplog):
+    import requests
+    transport_err = requests.HTTPError(response=MagicMock(status_code=503))
+    inst, discovered = _make_initialize(option_response=transport_err)
+    with caplog.at_level(logging.ERROR), \
+         patch('bumiworker.bumiworker.tasks.list_modules',
+               return_value=list(discovered)):
+        result1 = inst.list_modules('recommendations')
+        # Second call must hit _FETCH_FAILED sentinel — no new REST request.
+        result2 = inst.list_modules('recommendations')
+    assert result1 == result2 == []
+    assert inst.rest_cl.organization_option_get.call_count == 1
+
+
+def test_corrupt_json_option_treated_as_fetch_failure(caplog):
+    inst, discovered = _make_initialize(
+        option_response={'value': 'not-valid-json'})
+    with caplog.at_level(logging.ERROR), \
+         patch('bumiworker.bumiworker.tasks.list_modules',
+               return_value=list(discovered)):
+        result = inst.list_modules('recommendations')
+    assert result == []
+    error_msgs = [r.message for r in caplog.records
+                  if r.levelno == logging.ERROR]
+    assert any(ORG_ID in m for m in error_msgs)
 
 
 def test_non_recommendations_module_type_unaffected():

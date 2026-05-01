@@ -496,10 +496,11 @@ def make_app(db_type, etcd_host, etcd_port, wait=False, otel_config=None):
     else:
         db.create_schema()
 
-    try:
-        otel_config = config_cl.read_branch("/opentelemetry")
-    except etcd.EtcdKeyNotFound:
-        otel_config = {}
+    if otel_config is None:
+        try:
+            otel_config = config_cl.read_branch("/opentelemetry")
+        except etcd.EtcdKeyNotFound:
+            otel_config = {}
     try:
         otel_service_config = config_cl.read_branch("restapi/opentelemetry")
     except etcd.EtcdKeyNotFound:

@@ -297,7 +297,7 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         """
         if self._enabled_modules_cache is not _UNSET:
             if self._enabled_modules_cache is _FETCH_FAILED:
-                raise self._fetch_failed_exc
+                raise self._fetch_failed_exc from self._fetch_failed_exc
             return self._enabled_modules_cache
         org_id = self.body['organization_id']
         try:
@@ -311,7 +311,12 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         if raw_value == '{}':
             self._enabled_modules_cache = None
             return None
-        parsed = json.loads(raw_value)
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError as exc:
+            self._enabled_modules_cache = _FETCH_FAILED
+            self._fetch_failed_exc = exc
+            raise
         whitelist = set(parsed.get('types', []))
         self._enabled_modules_cache = whitelist
         return whitelist
@@ -332,11 +337,11 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         org_id = self.body['organization_id']
         try:
             whitelist = self._fetch_enabled_modules_whitelist()
-        except Exception as e:
+        except Exception:
             if not self._fetch_error_logged:
-                LOG.error(
-                    'option fetch or parse failed for org=%s key=%s: %s',
-                    org_id, ENABLED_MODULES_OPTION_KEY, e)
+                LOG.exception(
+                    'option fetch or parse failed for org=%s key=%s',
+                    org_id, ENABLED_MODULES_OPTION_KEY)
                 self._fetch_error_logged = True
             return []
 
