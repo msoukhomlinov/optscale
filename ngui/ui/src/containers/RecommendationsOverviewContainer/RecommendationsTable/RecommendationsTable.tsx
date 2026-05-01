@@ -18,6 +18,7 @@ type RecommendationsTableProps = {
   isDownloadAvailable: boolean;
   isGetIsDownloadAvailableLoading: boolean;
   selectedDataSourceIds: string[];
+  disabledModuleTypes?: ReadonlySet<string>;
 };
 
 const RecommendationsTable = ({
@@ -28,6 +29,7 @@ const RecommendationsTable = ({
   isDownloadAvailable,
   isGetIsDownloadAvailableLoading,
   selectedDataSourceIds,
+  disabledModuleTypes = new Set<string>(),
 }: RecommendationsTableProps) => {
   const tableData = useMemo(
     () =>
@@ -39,8 +41,9 @@ const RecommendationsTable = ({
         status: r.color || "ok",
         services: r.services,
         recommendation: r,
+        isDisabled: disabledModuleTypes.has(r.type),
       })),
-    [recommendations]
+    [recommendations, disabledModuleTypes]
   );
 
   const columns = useMemo(
@@ -48,11 +51,18 @@ const RecommendationsTable = ({
       buttonLink({
         headerDataTestId: "recommendation-name-header",
         accessorKey: "title",
+        // Suppress click + render plain text when the module is disabled in
+        // settings — otherwise users can navigate into a module that has
+        // been turned off in the overview, bypassing the gating that the
+        // cards branch already applies.
         onClick: ({
           row: {
-            original: { recommendation },
+            original: { recommendation, isDisabled },
           },
-        }) => onRecommendationClick(recommendation),
+        }) => {
+          if (isDisabled) return;
+          onRecommendationClick(recommendation);
+        },
       }),
       status({ headerDataTestId: "status-header", accessorKey: "status" }),
       text({ headerDataTestId: "items-count-header", headerMessageId: "items", accessorKey: "items" }),
@@ -60,15 +70,16 @@ const RecommendationsTable = ({
       services({ headerDataTestId: "services-header", accessorKey: "services" }),
       actions({
         headerDataTestId: "actions-header",
-        cell: ({ row: { original } }) => (
-          <Actions
-            downloadLimit={downloadLimit}
-            recommendation={original.recommendation}
-            isDownloadAvailable={isDownloadAvailable}
-            isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
-            selectedDataSourceIds={selectedDataSourceIds}
-          />
-        ),
+        cell: ({ row: { original } }) =>
+          original.isDisabled ? null : (
+            <Actions
+              downloadLimit={downloadLimit}
+              recommendation={original.recommendation}
+              isDownloadAvailable={isDownloadAvailable}
+              isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
+              selectedDataSourceIds={selectedDataSourceIds}
+            />
+          ),
       }),
     ],
     [downloadLimit, isDownloadAvailable, onRecommendationClick, isGetIsDownloadAvailableLoading, selectedDataSourceIds]

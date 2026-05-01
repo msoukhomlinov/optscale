@@ -101,9 +101,15 @@ const RecommendationsOverview = ({
     [recommendationClasses, recommendationsData, category, service, search, selectedDataSourceTypes]
   );
 
-  const { enabledTypes, optionRowExists, fetchOption } = useRecommendationModulesOption();
+  const { enabledTypes, optionRowExists, hasFetched, fetchOption } = useRecommendationModulesOption();
   useEffect(() => { fetchOption(); }, [fetchOption]);
   const disabledModuleTypes = useMemo<ReadonlySet<string>>(() => {
+    // Until the option fetch resolves, return empty so the overview does
+    // not flash modules as disabled based on stale store data — but pair
+    // this with `hasFetched` gating downstream so cards/table do not let
+    // the user act on a recommendation before we know whether it is
+    // actually enabled.
+    if (!hasFetched) return new Set<string>();
     if (!optionRowExists || !enabledTypes) return new Set<string>();
     const enabled = new Set(enabledTypes);
     return new Set(
@@ -111,7 +117,7 @@ const RecommendationsOverview = ({
         .map((r: BaseRecommendation) => r.type)
         .filter((t: string) => !enabled.has(t))
     );
-  }, [optionRowExists, enabledTypes, recommendations]);
+  }, [hasFetched, optionRowExists, enabledTypes, recommendations]);
 
   return (
     <Stack spacing={SPACING_2}>
@@ -151,7 +157,7 @@ const RecommendationsOverview = ({
               <Box className={classes.cardsGrid}>
                 <Cards
                   recommendations={recommendations}
-                  isLoading={!isDataReady}
+                  isLoading={!isDataReady || !hasFetched}
                   downloadLimit={downloadLimit}
                   onRecommendationClick={onRecommendationClick}
                   isDownloadAvailable={isDownloadAvailable}
@@ -164,12 +170,13 @@ const RecommendationsOverview = ({
             {view === VIEW_TABLE && (
               <RecommendationsTable
                 recommendations={recommendations}
-                isLoading={!isDataReady}
+                isLoading={!isDataReady || !hasFetched}
                 downloadLimit={downloadLimit}
                 onRecommendationClick={onRecommendationClick}
                 isDownloadAvailable={isDownloadAvailable}
                 isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
                 selectedDataSourceIds={selectedDataSourceIds}
+                disabledModuleTypes={disabledModuleTypes}
               />
             )}
           </>
