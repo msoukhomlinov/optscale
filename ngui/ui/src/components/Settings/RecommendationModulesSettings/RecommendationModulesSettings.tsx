@@ -70,7 +70,10 @@ const RecommendationModulesSettings = () => {
     const next = new Set(effectiveEnabled);
     if (nextOn) next.add(type);
     else next.delete(type);
-    const nextArr = Array.from(next).sort();
+    // Intersect with discovered: stale types from old option rows would be rejected by
+    // the backend validator as unknown modules, blocking all subsequent toggles.
+    const discoveredSet = new Set(discovered);
+    const nextArr = Array.from(next).filter((t) => discoveredSet.has(t)).sort();
     if (nextArr.length === 0) {
       setPendingTypes(nextArr);
       setConfirmEmptyOpen(true);
