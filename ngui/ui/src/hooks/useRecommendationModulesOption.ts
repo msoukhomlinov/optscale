@@ -43,10 +43,24 @@ export const useRecommendationModulesOption = () => {
   // Before that, rawValue still holds its default "{}" placeholder, which is
   // indistinguishable from "no row exists" — callers must not act on the
   // derived enabledTypes (and certainly not submit toggles) until this is true.
+  // Also reset on `organizationId` change so an org switch on the same page
+  // does not let toggles fire against the new org while apiData still holds
+  // the previous org's option/discovery payload (would cause a stale-stored
+  // module set to be written into the wrong organization).
   const wasLoadingRef = useRef(false);
   const wasDiscoveryLoadingRef = useRef(false);
   const [hasFetchedOption, setHasFetchedOption] = useState(false);
   const [hasFetchedDiscovered, setHasFetchedDiscovered] = useState(false);
+  const fetchedOrgIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (fetchedOrgIdRef.current !== organizationId) {
+      fetchedOrgIdRef.current = organizationId;
+      wasLoadingRef.current = false;
+      wasDiscoveryLoadingRef.current = false;
+      setHasFetchedOption(false);
+      setHasFetchedDiscovered(false);
+    }
+  }, [organizationId]);
   useEffect(() => {
     if (isLoading) {
       wasLoadingRef.current = true;

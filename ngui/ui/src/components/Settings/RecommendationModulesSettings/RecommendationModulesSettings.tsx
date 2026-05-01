@@ -21,6 +21,7 @@ import { FormattedMessage, useIntl } from "react-intl";
 import { useIsAllowed } from "hooks/useAllowedActions";
 import { useApiState } from "hooks/useApiState";
 import { useOptscaleRecommendations } from "hooks/useOptscaleRecommendations";
+import { useOrganizationInfo } from "hooks/useOrganizationInfo";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 import { UPDATE_ORGANIZATION_OPTION } from "api/restapi/actionTypes";
 import { ALIBABA_CNR, AWS_CNR, AZURE_CNR, GCP_CNR, NEBIUS } from "utils/constants";
@@ -35,6 +36,7 @@ const CLOUD_LABEL: Record<string, string> = {
 
 const RecommendationModulesSettings = () => {
   const intl = useIntl();
+  const { organizationId } = useOrganizationInfo();
   const isEditAllowed = useIsAllowed({ requiredActions: ["EDIT_PARTNER"] });
   const recommendationsByType = useOptscaleRecommendations();
   const {
@@ -57,6 +59,16 @@ const RecommendationModulesSettings = () => {
   useEffect(() => {
     setOptimisticEnabled(null);
   }, [enabledTypes]);
+
+  // Drop optimistic + pending state when the user switches organization on
+  // the same page. Without this, a Set<string> built against the previous
+  // org's enabledTypes could be flushed by a subsequent toggle into the new
+  // org and overwrite its module whitelist.
+  useEffect(() => {
+    setOptimisticEnabled(null);
+    setPendingTypes(null);
+    setConfirmEmptyOpen(false);
+  }, [organizationId]);
 
   // Optimistic rollback on save failure. The redux api middleware swallows
   // request errors and resolves the dispatch promise after dispatching
