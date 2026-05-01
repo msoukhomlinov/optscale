@@ -147,9 +147,17 @@ export const useRecommendationModulesOption = () => {
     // them render without blocking on the discovery endpoint, which may
     // 404 on a rolling deploy or fail transiently.
     hasFetchedOption,
-    optionFailed: isOptionError && !isLoading,
-    discoveryFailed: isDiscoveredError && !isLoadingDiscovered,
-    fetchFailed: (isOptionError && !isLoading) || (isDiscoveredError && !isLoadingDiscovered),
+    // Failure flags also require the store hash to reflect the current
+    // (org, key) tuple. Without this check, a stale error from a previous
+    // org's request would persist in `state.api[label]` and satisfy
+    // `optionFailed` after an org switch, letting consumers
+    // (eg the overview's `moduleStateResolved`) render all modules as
+    // enabled before the new org's fetch had a chance to land.
+    optionFailed: isOptionError && !isLoading && optionStoreMatches,
+    discoveryFailed: isDiscoveredError && !isLoadingDiscovered && discoveredStoreMatches,
+    fetchFailed:
+      (isOptionError && !isLoading && optionStoreMatches) ||
+      (isDiscoveredError && !isLoadingDiscovered && discoveredStoreMatches),
     optionRowExists,
     enabledTypes: parsed?.types ?? null,
     discoveredBackend,
