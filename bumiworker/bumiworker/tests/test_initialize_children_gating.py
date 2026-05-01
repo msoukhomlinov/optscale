@@ -47,6 +47,7 @@ def _make_initialize(cls=InitializeChecklist, *, option_response,
     inst._enabled_modules_cache = _UNSET
     inst._stale_warned = set()
     inst._fetch_error_logged = False
+    inst._fetch_failed_exc = None
 
     mock_rest_cl = MagicMock()
     if isinstance(option_response, Exception):
@@ -58,7 +59,7 @@ def _make_initialize(cls=InitializeChecklist, *, option_response,
     else:
         mock_rest_cl.organization_option_get.return_value = (
             200, option_response)
-    inst.rest_cl = mock_rest_cl
+    inst._rest_cl = mock_rest_cl
 
     mock_config_cl = MagicMock()
     mock_config_cl.disabled_recommendations.return_value = list(global_disabled)
@@ -97,6 +98,10 @@ def test_global_disabled_wins_over_whitelist():
 
 
 def test_stale_module_in_option_logged_warning_once(caplog):
+    # Note: dedup is per-instance only. In production, each task dispatch
+    # creates a new instance, so stale warnings fire on every scheduler run
+    # as long as the stale entry remains in the org option. This is acceptable
+    # — the warning draws attention to config that needs cleanup.
     inst, discovered = _make_initialize(
         option_response={'value': json.dumps(
             {'types': ['mod_a', 'stale_mod']})})

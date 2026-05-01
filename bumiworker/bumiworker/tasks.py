@@ -64,10 +64,6 @@ class Base(object):
             self._rest_cl.secret = self.config_cl.cluster_secret()
         return self._rest_cl
 
-    @rest_cl.setter
-    def rest_cl(self, value):
-        self._rest_cl = value
-
     @property
     def s3_client(self):
         if self._s3_client is None:
@@ -281,6 +277,7 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         self._enabled_modules_cache = _UNSET
         self._stale_warned = set()
         self._fetch_error_logged = False
+        self._fetch_failed_exc = None
 
     @property
     def module_type(self):
@@ -300,14 +297,15 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         """
         if self._enabled_modules_cache is not _UNSET:
             if self._enabled_modules_cache is _FETCH_FAILED:
-                raise requests.HTTPError('cached fetch failure')
+                raise self._fetch_failed_exc
             return self._enabled_modules_cache
         org_id = self.body['organization_id']
         try:
             _, resp = self.rest_cl.organization_option_get(
                 org_id, ENABLED_MODULES_OPTION_KEY)
-        except requests.HTTPError:
+        except requests.HTTPError as exc:
             self._enabled_modules_cache = _FETCH_FAILED
+            self._fetch_failed_exc = exc
             raise
         raw_value = resp.get('value', '{}')
         if raw_value == '{}':
@@ -324,7 +322,8 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         disabled = set(self.config_cl.disabled_recommendations() or [])
         filtered = [m for m in modules if m not in disabled]
         skipped_global = [m for m in modules if m in disabled]
-        LOG.info("[disabled modules] %s::%s", module_type, skipped_global)
+        if skipped_global:
+            LOG.info("[disabled modules] %s::%s", module_type, skipped_global)
 
         # Per-org gate: only applies to RECOMMENDATION_FOLDER.
         if module_type != RECOMMENDATION_FOLDER:
@@ -336,7 +335,7 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         except Exception as e:
             if not self._fetch_error_logged:
                 LOG.error(
-                    'option fetch failed for org=%s key=%s: %s',
+                    'option fetch or parse failed for org=%s key=%s: %s',
                     org_id, ENABLED_MODULES_OPTION_KEY, e)
                 self._fetch_error_logged = True
             return []
