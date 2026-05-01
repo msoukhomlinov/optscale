@@ -45,10 +45,16 @@ const RecommendationModulesSettings = () => {
 
   const [confirmEmptyOpen, setConfirmEmptyOpen] = useState(false);
   const [pendingTypes, setPendingTypes] = useState<string[] | null>(null);
+  const [optimisticEnabled, setOptimisticEnabled] = useState<Set<string> | null>(null);
 
   useEffect(() => {
     fetchOption();
   }, [fetchOption]);
+
+  // When the server confirms a write (enabledTypes changes), discard optimistic state.
+  useEffect(() => {
+    setOptimisticEnabled(null);
+  }, [enabledTypes]);
 
   const discovered = useMemo(
     () => Object.keys(recommendationsByType).sort(),
@@ -56,8 +62,8 @@ const RecommendationModulesSettings = () => {
   );
 
   const effectiveEnabled = useMemo(
-    () => new Set(enabledTypes ?? discovered),
-    [enabledTypes, discovered]
+    () => optimisticEnabled ?? new Set(enabledTypes ?? discovered),
+    [optimisticEnabled, enabledTypes, discovered]
   );
 
   const newModuleCount = useMemo(() => {
@@ -72,6 +78,7 @@ const RecommendationModulesSettings = () => {
     const next = new Set(effectiveEnabled);
     if (nextOn) next.add(type);
     else next.delete(type);
+    setOptimisticEnabled(next);
     const discoveredSet = new Set(discovered);
     // Types in the stored option that aren't rendered here (e.g. Nebius modules when
     // the Nebius connection is removed) may still be valid on the backend — pass them
@@ -191,7 +198,7 @@ const RecommendationModulesSettings = () => {
           <FormattedMessage id="recommendationModuleDisableAllConfirmBody" />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setConfirmEmptyOpen(false); setPendingTypes(null); }}>
+          <Button onClick={() => { setConfirmEmptyOpen(false); setPendingTypes(null); setOptimisticEnabled(null); }}>
             <FormattedMessage id="cancel" />
           </Button>
           <Button
