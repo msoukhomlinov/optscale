@@ -5,6 +5,7 @@ import tarfile
 
 import pydevd_pycharm
 import tornado.ioloop
+import etcd
 from etcd import Lock as EtcdLock
 from tornado.web import RedirectHandler
 
@@ -495,11 +496,19 @@ def make_app(db_type, etcd_host, etcd_port, wait=False, otel_config=None):
     else:
         db.create_schema()
 
+    try:
+        otel_config = config_cl.read_branch("/opentelemetry")
+    except etcd.EtcdKeyNotFound:
+        otel_config = {}
+    try:
+        otel_service_config = config_cl.read_branch("restapi/opentelemetry")
+    except etcd.EtcdKeyNotFound:
+        otel_service_config = {}
     config = OpenTelemetryConfig(
         service_name=os.getenv("OTEL_SERVICE_NAME", "restapi"),
         service_version=os.getenv("OTEL_SERVICE_VERSION", "local"),
-        otel_config=config_cl.read_branch("/opentelemetry"),
-        service_config=config_cl.read_branch("restapi/opentelemetry"),
+        otel_config=otel_config,
+        service_config=otel_service_config,
         sqlalchemy_engine=db.engine,
     )
     config.setup_open_telemetry()
