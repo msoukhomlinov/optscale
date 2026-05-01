@@ -130,7 +130,15 @@ const RecommendationModulesSettings = () => {
     const passThrough = enabledTypes === null
       ? Array.from(discoveredBackend).filter((t) => !discoveredSet.has(t))
       : enabledTypes.filter((t) => !discoveredSet.has(t) && discoveredBackend.has(t));
-    const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
+    // Also intersect the visible selection with `discoveredBackend` — when
+    // the UI is newer than the backend (rolling-upgrade skew), this UI may
+    // render module tiles for types the deployed backend does not yet know
+    // about. Submitting them would trip the OE0217 validator and lock all
+    // saves until versions align. Drop unknowns; the toggle still appears
+    // checked but is excluded from the persisted whitelist.
+    const visibleSelected = Array.from(next).filter(
+      (t) => discoveredSet.has(t) && discoveredBackend.has(t)
+    );
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,
       // matching the "silence ALL recommendation modules" dialog wording.

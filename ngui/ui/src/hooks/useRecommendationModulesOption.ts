@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDispatch } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import {
   getOrganizationOption,
   getDiscoveredRecommendationModules,
@@ -9,6 +9,7 @@ import {
   GET_ORGANIZATION_OPTION,
   GET_DISCOVERED_RECOMMENDATION_MODULES,
 } from "api/restapi/actionTypes";
+import { hashParams } from "api/utils";
 import { useApiData } from "hooks/useApiData";
 import { useApiState } from "hooks/useApiState";
 import { useOrganizationInfo } from "hooks/useOrganizationInfo";
@@ -24,6 +25,25 @@ export const useRecommendationModulesOption = () => {
 
   const { isLoading, isError: isOptionError } = useApiState(GET_ORGANIZATION_OPTION);
   const { apiData: rawValue } = useApiData(GET_ORGANIZATION_OPTION, "{}");
+  // Hash of the most recent fetch the store reflects, vs. the hash for the
+  // CURRENT (org, key) tuple we want. They diverge after an org switch
+  // until the new org's fetch lands — using this divergence as a gate
+  // prevents a late success from a previous org from satisfying
+  // `hasFetchedOption` and exposing stale `rawValue`.
+  const optionStoreHash = useSelector((state: any) => state.api?.[GET_ORGANIZATION_OPTION]?.hash ?? 0);
+  const optionExpectedHash = useMemo(
+    () => hashParams({ organizationId, name: OPTION_KEY }),
+    [organizationId]
+  );
+  const optionStoreMatches = optionStoreHash === optionExpectedHash;
+  const discoveredStoreHash = useSelector(
+    (state: any) => state.api?.[GET_DISCOVERED_RECOMMENDATION_MODULES]?.hash ?? 0
+  );
+  const discoveredExpectedHash = useMemo(
+    () => hashParams({ organizationId }),
+    [organizationId]
+  );
+  const discoveredStoreMatches = discoveredStoreHash === discoveredExpectedHash;
 
   // Backend's currently-discovered recommendation module names. The validator
   // for `enabled_recommendation_modules` rejects unknown types with OE0217,
@@ -64,26 +84,25 @@ export const useRecommendationModulesOption = () => {
   useEffect(() => {
     if (isLoading) {
       wasLoadingRef.current = true;
-    } else if (wasLoadingRef.current && !isOptionError) {
-      // Only flip on a successful load. On error, leave hasFetchedOption
-      // false so toggles stay blocked — rawValue would still be the stale
-      // default ("{}") and a save could overwrite the real org setting
-      // with a whitelist reconstructed from incomplete data.
+    } else if (wasLoadingRef.current && !isOptionError && optionStoreMatches) {
+      // Only flip on a successful load AND when the store hash matches the
+      // current org+key — otherwise a late success from a previous org
+      // could satisfy this branch and unblock toggles with stale rawValue
+      // (subsequent save would overwrite the real org setting).
       setHasFetchedOption(true);
     }
-  }, [isLoading, isOptionError]);
+  }, [isLoading, isOptionError, optionStoreMatches]);
   useEffect(() => {
     if (isLoadingDiscovered) {
       wasDiscoveryLoadingRef.current = true;
-    } else if (wasDiscoveryLoadingRef.current && !isDiscoveredError) {
-      // Only flip hasFetchedDiscovered when the request actually succeeded.
-      // On error, leave it false so toggles stay blocked — the empty default
-      // would otherwise be indistinguishable from "backend has no modules"
-      // and the passThrough filter would silently drop every hidden module
-      // type from a stored whitelist.
+    } else if (
+      wasDiscoveryLoadingRef.current &&
+      !isDiscoveredError &&
+      discoveredStoreMatches
+    ) {
       setHasFetchedDiscovered(true);
     }
-  }, [isLoadingDiscovered, isDiscoveredError]);
+  }, [isLoadingDiscovered, isDiscoveredError, discoveredStoreMatches]);
 
   // Toggles must wait for BOTH the option row and backend discovery — the
   // discovery list is needed to filter stale stored types and to seed the
