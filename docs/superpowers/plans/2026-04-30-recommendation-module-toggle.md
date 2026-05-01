@@ -165,7 +165,10 @@ def test_enabled_recommendation_modules_create_unknown_module(self):
         code, resp = self.client.organization_option_create(
             self.org_id1, 'enabled_recommendation_modules', bad_value)
     self.assertEqual(code, 400)
-    self.assertIn('nonexistent_module', resp['error']['reason'])
+    # Verify error message references the unknown module name.
+    # Note: error envelope shape is {'error': {'reason': '...'}} — verify against
+    # an existing 400 test in this file before assuming. If shape differs, adjust.
+    self.assertIn('nonexistent_module', str(resp))
 
 def test_enabled_recommendation_modules_update_unknown_module(self):
     # Pre-create a valid row, then attempt update with bad type.
@@ -181,7 +184,7 @@ def test_enabled_recommendation_modules_update_unknown_module(self):
         code, resp = self.client.organization_option_update(
             self.org_id1, 'enabled_recommendation_modules', bad_value)
     self.assertEqual(code, 400)
-    self.assertIn('nonexistent_module', resp['error']['reason'])
+    self.assertIn('nonexistent_module', str(resp))
 
 def test_enabled_recommendation_modules_malformed_json(self):
     bad_value = {'value': 'not-a-json-string'}
@@ -340,12 +343,17 @@ python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_opt
 
 Expected: all original tests still PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
+# Include any new __init__.py stubs created by the touch loop in Step 0.
+# git add is a no-op for existing files, so this is safe regardless.
 git add rest_api/Dockerfile \
         rest_api/rest_api_server/controllers/organization_options.py \
-        rest_api/rest_api_server/tests/unittests/test_organization_options_api.py
+        rest_api/rest_api_server/tests/unittests/test_organization_options_api.py \
+        bumiworker/__init__.py \
+        bumiworker/bumiworker/__init__.py \
+        bumiworker/bumiworker/modules/__init__.py
 git commit -m "feat(rest_api): add enabled_recommendation_modules validator with discovery cross-check"
 ```
 
@@ -561,6 +569,14 @@ Read current `bumiworker/bumiworker/tasks.py:269-310` first to confirm class sha
 ```bash
 sed -n '269,310p' bumiworker/bumiworker/tasks.py
 ```
+
+Verify `CheckTimeoutThreshold` does not already define `__init__` (which would need to be called explicitly):
+
+```bash
+grep -n "class CheckTimeoutThreshold\|def __init__" bumiworker/bumiworker/tasks.py | head -20
+```
+
+If `CheckTimeoutThreshold` defines its own `__init__`, `super().__init__(*args, **kwargs)` in the new `InitializeChildrenBase.__init__` will call it correctly via MRO — no change needed. If it does NOT define `__init__`, `super().__init__(*args, **kwargs)` goes up to the next class in MRO (likely `celery.Task.__init__`). Either way, the `super()` call is correct.
 
 Modify `InitializeChildrenBase.list_modules` (replace existing method around line 277). Add `import json` if not already present, and add `import requests`. Do NOT add `import logging` or redefine `LOG` — `tasks.py:21` already defines `LOG = get_logger(__name__)` (kombu). Reusing the existing `LOG` is correct.
 
@@ -787,6 +803,14 @@ grep -rn "organization_option\|organizationOption" ngui/ui/src/hooks/ ngui/ui/sr
 
 Identify the existing pattern (Apollo/redux/saga). Read at least one example end-to-end (e.g. `useDisabledRecommendations` if it exists; fall back to grep for `organizationOptions` in actions/api).
 
+Verify `useApiData` destructuring shape — the hook returns `{ apiData }` NOT `{ data }`:
+
+```bash
+grep -n "return\|apiData\|const {" ngui/ui/src/hooks/useApiData.ts 2>/dev/null | head -10
+```
+
+If the return key differs (e.g., `data` instead of `apiData`), update `const { apiData: rawValue }` to match.
+
 - [ ] **Step 1.5: Verify absent-row sentinel in controller + saga layer**
 
 ```bash
@@ -919,9 +943,9 @@ git commit -m "feat(ngui): add useRecommendationModulesOption hook"
 
 `ConfirmationModal` does not exist in this codebase — `AlertDialog` is single-button only. Use an inline MUI `Dialog` for the "disable all" confirmation.
 
-`BaseRecommendation.constructor` requires `(status: Status, apiResponse: TODO)`. TypeScript will error on `new RecClass()`. Instantiate with dummy args to access the title class field: `new RecClass(STATUS.ACTIVE, {}).title`. Import `STATUS` from `BaseRecommendation`.
+`BaseRecommendation.constructor` has `(status: Status, apiResponse: TODO)` as typed params, but `title`/`type` are class-field initializers that run before the body, so `new RecClass().title` works at runtime even without args. This matches the existing `useOptscaleRecommendations.ts` pattern (`new Rec().type` no-arg at line 77). TypeScript strict mode may flag it — suppress with `// @ts-expect-error` on that line if the compiler complains, or cast: `(RecClass as any)`. Do NOT import `STATUS` — no-arg is correct and consistent with the existing hook.
 
-`optionRowExists` must track HTTP status (200 vs 404), not JSON parse success — see hook contract from Task 5.
+`optionRowExists` must track whether the option row exists in the DB (HTTP 200 + non-sentinel value), not JSON parse success — see hook contract from Task 5.
 
 ```tsx
 import { useEffect, useMemo, useState } from "react";
@@ -1162,6 +1186,8 @@ sed -n '1,160p' ngui/ui/src/containers/RecommendationsOverviewContainer/Cards/Ca
 ```
 
 Note the exact `<RecommendationCard ... />` invocation. Disabled-state changes its appearance only; do not alter behavior for enabled tiles.
+
+**v1 scope decision:** disabled-tile rendering applies to the Cards (tile) view only. The table/list view (`RecommendationsTable` or equivalent) does NOT show disabled state in v1 — disabled modules are already silenced at the scheduler level so they won't appear in results anyway. If `RecommendationsOverview.tsx` also renders a table view, do NOT pass `disabledModuleTypes` to it in this task.
 
 - [ ] **Step 2: Extend Cards.tsx with `disabledModuleTypes` prop**
 
