@@ -113,14 +113,35 @@ export const useRecommendationModulesOption = () => {
 
   const parsed = useMemo<EnabledModulesValue | null>(() => {
     if (!optionRowExists) return null;
-    const result = parseJSON(rawValue, null) as EnabledModulesValue | null;
+    const result = parseJSON(rawValue, null) as unknown;
     if (result === null) {
       console.warn(
         "[useRecommendationModulesOption] corrupt option row — rawValue is not valid JSON; " +
           "defaulting to all-enabled. Fix the row via DELETE /organizations/.../options/enabled_recommendation_modules"
       );
+      return null;
     }
-    return result;
+    // Runtime shape guard: a stored row like {"types":"obsolete_ips"}
+    // (valid JSON but wrong schema, eg from legacy / manual writes that
+    // bypassed the new backend validator) would otherwise reach
+    // handleToggle and call `.filter` on a non-array, throwing at toggle
+    // time and breaking the settings UI. Treat any wrong shape the same
+    // as corrupt JSON: warn and return null so consumers fall back to the
+    // all-enabled default.
+    if (
+      typeof result !== "object" ||
+      result === null ||
+      !Array.isArray((result as Record<string, unknown>).types) ||
+      !((result as { types: unknown[] }).types).every((t) => typeof t === "string")
+    ) {
+      console.warn(
+        "[useRecommendationModulesOption] malformed option row — expected " +
+          '{ types: string[] }; falling back to all-enabled. Fix via ' +
+          "DELETE /organizations/.../options/enabled_recommendation_modules"
+      );
+      return null;
+    }
+    return result as EnabledModulesValue;
   }, [rawValue, optionRowExists]);
 
   const fetchOption = useCallback(() => {
