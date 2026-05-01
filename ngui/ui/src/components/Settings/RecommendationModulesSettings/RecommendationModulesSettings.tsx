@@ -108,7 +108,7 @@ const RecommendationModulesSettings = () => {
                 checked={effectiveEnabled.has(type)}
                 onChange={(_, checked) => handleToggle(type, checked)}
                 inputProps={{
-                  "aria-label": intl.formatMessage({ id: "recommendationModules" }),
+                  "aria-label": intl.formatMessage({ id: titleKey }),
                 }}
                 data-test-id={`switch_${type}`}
               />
