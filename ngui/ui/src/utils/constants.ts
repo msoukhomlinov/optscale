@@ -1050,4 +1050,5 @@ export const SETTINGS_TABS = Object.freeze({
   INVITATIONS: "invitations",
   SSH: "sshKeys",
   EMAIL_NOTIFICATIONS: "emailNotifications",
+  RECOMMENDATION_MODULES: "recommendationModules",
 });
