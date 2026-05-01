@@ -178,6 +178,11 @@ class BaseRecommendation {
 
   withCleanupScripts = false;
 
+  // Human-readable description of extra cloud API calls made during each module run.
+  // null = module reads cached MongoDB data only (no additional cloud API calls).
+  // Set to a short string on modules that call cloud APIs at scan time (e.g. "~2 Monitor reads/account/run").
+  apiCallInfo: string | null = null;
+
   static getResourceDescriptionMessageValues() {}
 
   get descriptionMessageValues() {
