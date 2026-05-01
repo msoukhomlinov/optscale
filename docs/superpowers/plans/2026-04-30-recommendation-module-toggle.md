@@ -404,7 +404,6 @@ def _make_initialize(cls=InitializeChecklist, *, option_response,
     Note: the REST API NEVER returns 404 for organization_option_get — absent
     rows return 200 with value='{}'. HTTPError only fires on transport failures.
     """
-    import requests
     inst = cls.__new__(cls)
     inst.body = {'organization_id': ORG_ID}
     inst._enabled_modules_cache = _UNSET
@@ -568,6 +567,28 @@ _UNSET = object()
 _FETCH_FAILED = object()
 ```
 
+Also add `_fetch_error_logged` instance flag alongside `_enabled_modules_cache` in `__init__`:
+
+```python
+self._enabled_modules_cache = _UNSET
+self._stale_warned = set()
+self._fetch_error_logged = False
+```
+
+And in `list_modules`, dedupe the ERROR log:
+
+```python
+        try:
+            whitelist = self._fetch_enabled_modules_whitelist()
+        except Exception as e:
+            if not self._fetch_error_logged:
+                LOG.error(
+                    'option fetch failed for org=%s key=%s: %s',
+                    org_id, ENABLED_MODULES_OPTION_KEY, e)
+                self._fetch_error_logged = True
+            return []
+```
+
 Add `_fetch_enabled_modules_whitelist` method + replace `list_modules` on `InitializeChildrenBase`:
 
 ```python
@@ -625,9 +646,11 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         try:
             whitelist = self._fetch_enabled_modules_whitelist()
         except Exception as e:
-            LOG.error(
-                'option fetch failed for org=%s key=%s: %s',
-                org_id, ENABLED_MODULES_OPTION_KEY, e)
+            if not self._fetch_error_logged:
+                LOG.error(
+                    'option fetch failed for org=%s key=%s: %s',
+                    org_id, ENABLED_MODULES_OPTION_KEY, e)
+                self._fetch_error_logged = True
             return []
 
         if whitelist is None:
@@ -733,7 +756,6 @@ Open `ngui/ui/src/translations/en-US/app.json` and add (alphabetical position) t
   "recommendationModuleDiscoveryBanner": "{count, plural, one {# new module} other {# new modules}} available — review and enable",
   "recommendationModuleDisableAllConfirmTitle": "Disable all recommendation modules?",
   "recommendationModuleDisableAllConfirmBody": "This will silence ALL recommendation modules. Continue?",
-  "recommendationModuleSaveErrorToast": "Could not update recommendation modules. Reverted.",
   "recommendationModuleUnknownModule": "Unknown module name",
 ```
 
@@ -812,7 +834,8 @@ export const useRecommendationModulesOption = () => {
   const { organizationId } = useOrganizationInfo();
 
   const { isLoading } = useApiState(GET_ORGANIZATION_OPTION);
-  // rawValue is the JSON string stored by reducer, or null/undefined/default when absent.
+  // rawValue lifecycle: null (pre-fetch, default) → '{}' (absent row sentinel) → JSON-string (present row).
+  // Component distinguishes null-pre-fetch via isLoading, not optionRowExists.
   const { apiData: rawValue } = useApiData(GET_ORGANIZATION_OPTION, null);
 
   // optionRowExists: controller returns '{}' when no row exists (not 404).
@@ -885,7 +908,6 @@ git commit -m "feat(ngui): add useRecommendationModulesOption hook"
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Switch, Typography } from "@mui/material";
 import { FormattedMessage, useIntl } from "react-intl";
-import { STATUS } from "containers/RecommendationsOverviewContainer/recommendations/BaseRecommendation";
 import { useOptscaleRecommendations } from "hooks/useOptscaleRecommendations";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 
@@ -926,14 +948,9 @@ const RecommendationModulesSettings = () => {
     return discovered.filter((t) => !stored.has(t)).length;
   }, [optionRowExists, enabledTypes, discovered]);
 
-  const submit = async (nextTypes: string[]) => {
-    try {
-      await updateTypes(nextTypes);
-    } catch {
-      // Error toast surfaced by redux error middleware in useRecommendationModulesOption.
-      // Next render re-fetches and reverts optimistic state.
-    }
-  };
+  // Errors surface via redux apiError middleware → existing app-level error toast.
+  // No try/catch needed — the middleware promise always resolves.
+  const submit = (nextTypes: string[]) => updateTypes(nextTypes);
 
   const handleToggle = (type: string, nextOn: boolean) => {
     const next = new Set(effectiveEnabled);
@@ -971,8 +988,8 @@ const RecommendationModulesSettings = () => {
       <Box>
         {discovered.map((type) => {
           const RecClass = recommendationsByType[type];
-          // BaseRecommendation.title is a class field; needs dummy constructor args for TypeScript.
-          const titleKey = new RecClass(STATUS.ACTIVE, {}).title;
+          // BaseRecommendation.title is a class instance field; no-arg constructor matches existing codebase convention.
+          const titleKey = new RecClass().title;
           return (
             <Box
               key={type}
@@ -1199,9 +1216,10 @@ Add `Chip` and `Tooltip` to the MUI import line: `import { Box, Chip, Tooltip } 
 
 - [ ] **Step 3: Wire up `disabledModuleTypes` prop in `RecommendationsOverview.tsx`**
 
-Read `ngui/ui/src/containers/RecommendationsOverviewContainer/RecommendationsOverview.tsx`. Add the hook:
+Read `ngui/ui/src/containers/RecommendationsOverviewContainer/RecommendationsOverview.tsx`. The file has NO React imports — `useMemo` must be added explicitly.
 
 ```tsx
+import { useMemo } from "react";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 
 // inside the component:
@@ -1262,10 +1280,10 @@ sudo nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io \
 
 Expected: build succeeds.
 
-Verify the import path resolves in the image (catches Dockerfile COPY omission):
+Verify the import path resolves in the actual runtime environment (uv venv, not bare python3):
 ```bash
 sudo nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io \
-  run --rm rest_api:local python3 -c \
+  run --rm rest_api:local uv --project rest_api run python -c \
   "from bumiworker.bumiworker.modules.module import list_modules; print(list_modules('recommendations'))"
 ```
 
@@ -1376,31 +1394,18 @@ Capture screenshots / log excerpts for the PR description.
 **Files:**
 - None directly. Agent dispatches.
 
-- [ ] **Step 1: Dispatch `pr-review-toolkit:code-reviewer`**
+- [ ] **Step 1: Invoke `pr-review-toolkit:review-pr` skill**
 
-Dispatch agent against `git diff integration..HEAD` with prompt:
+Use the `Skill` tool to invoke `pr-review-toolkit:review-pr`. The skill orchestrates code-reviewer, silent-failure-hunter, and type-design-analyzer sub-agents internally.
 
-> Review the unstaged + committed changes on this branch (`feat/recommendation-module-toggle`) for correctness, project-convention adherence, and adherence to the spec at `docs/superpowers/specs/2026-04-30-recommendation-module-toggle-design.md`. Flag any deviation from the locked design table or critical invariants.
+Provide context:
+- Branch: `feat/recommendation-module-toggle`
+- Spec: `docs/superpowers/specs/2026-04-30-recommendation-module-toggle-design.md`
+- Focus areas: `_validate_enabled_modules`, `_fetch_enabled_modules_whitelist`, `useRecommendationModulesOption`, disabled-tile rendering, type design for lazy-default vs whitelist-active distinction.
 
-Address all HIGH + MEDIUM findings before proceeding. LOW findings: judge case-by-case, address or note.
+Address all HIGH + MEDIUM findings before proceeding. LOW: judge case-by-case.
 
-- [ ] **Step 2: Dispatch `pr-review-toolkit:silent-failure-hunter`**
-
-Dispatch agent with prompt:
-
-> Audit the changes on `feat/recommendation-module-toggle` for silent failures: swallowed exceptions, fallback values that mask real problems, optimistic UI updates that don't surface errors, missing log lines on error paths. Focus on `_validate_enabled_modules`, `_fetch_enabled_modules_whitelist`, `useRecommendationModulesOption`, and the disabled-tile error states.
-
-Address findings.
-
-- [ ] **Step 3: Dispatch `pr-review-toolkit:type-design-analyzer`**
-
-Dispatch agent with prompt:
-
-> Review the new types introduced on `feat/recommendation-module-toggle` (Python: validators, sentinels; TypeScript: `EnabledModulesValue`, `disabledModuleTypes` prop). Assess encapsulation, invariant expression, and whether the API surfaces let callers express the lazy-default vs whitelist-active distinction correctly without footguns.
-
-Address findings.
-
-- [ ] **Step 4: Run final test suite**
+- [ ] **Step 2: Run final test suite**
 
 ```bash
 cd /home/iitadmin/optscale-fork
@@ -1411,13 +1416,13 @@ cd ngui/ui && npx tsc --noEmit
 
 Expected: all tests PASS, no TypeScript errors.
 
-- [ ] **Step 5: No commit if no changes — otherwise commit fixes**
+- [ ] **Step 3: No commit if no changes — otherwise commit fixes**
 
 ```bash
 git status
 # if dirty:
 git add <files>
-git commit -m "fix(qa): address findings from code-reviewer/silent-failure-hunter/type-design-analyzer"
+git commit -m "fix(qa): address findings from review-pr skill"
 ```
 
 ---
@@ -1539,7 +1544,7 @@ git push origin dev
 **Spec coverage** — every locked decision in spec § "Locked decisions" table maps to a task:
 - Whitelist key + lazy default + JSON-string convention → Task 2 validator
 - Gate at `InitializeChildrenBase.list_modules` + filter composition → Task 3
-- Archive symmetry via inheritance → Task 3 Step 5 (test_initialize_archive_inherits_override)
+- Archive scheduler — gate does NOT apply to archive folder (intentional: archive uses `'archive'` module type, not `'recommendations'`); confirmed by `test_non_recommendations_module_type_unaffected` and `test_initialize_service_inherits_override`
 - Direct per-toggle PATCH (no save button) → Task 6 Step 1 `handleToggle`
 - Tile UI grey + badge + tooltip + Settings link → Task 8
 - Discovery banner → Task 6 Step 1 (`newModuleCount` block)
