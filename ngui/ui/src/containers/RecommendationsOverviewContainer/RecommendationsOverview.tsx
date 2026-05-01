@@ -1,4 +1,6 @@
+import { useEffect, useMemo } from "react";
 import { Grid } from "@mui/material";
+import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 import Stack from "@mui/material/Stack";
 import { Box } from "@mui/system";
 import InlineSeverityAlert from "components/InlineSeverityAlert";
@@ -95,6 +97,18 @@ const RecommendationsOverview = ({
     .filter(appliedDataSourcesFilter(selectedDataSourceTypes))
     .sort(sortRecommendation);
 
+  const { enabledTypes, optionRowExists, fetchOption } = useRecommendationModulesOption();
+  useEffect(() => { fetchOption(); }, [fetchOption]);
+  const disabledModuleTypes = useMemo<ReadonlySet<string>>(() => {
+    if (!optionRowExists || !enabledTypes) return new Set<string>();
+    const enabled = new Set(enabledTypes);
+    return new Set(
+      recommendations
+        .map((r: BaseRecommendation) => r.type)
+        .filter((t: string) => !enabled.has(t))
+    );
+  }, [optionRowExists, enabledTypes, recommendations]);
+
   return (
     <Stack spacing={SPACING_2}>
       <div>
@@ -139,6 +153,7 @@ const RecommendationsOverview = ({
                   isDownloadAvailable={isDownloadAvailable}
                   isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
                   selectedDataSourceIds={selectedDataSourceIds}
+                  disabledModuleTypes={disabledModuleTypes}
                 />
               </Box>
             )}

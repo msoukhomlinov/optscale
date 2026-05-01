@@ -1,7 +1,8 @@
 import ErrorOutlineOutlinedIcon from "@mui/icons-material/ErrorOutlineOutlined";
-import { Box } from "@mui/material";
+import { Box, Chip, Link as MuiLink, Tooltip } from "@mui/material";
 import Typography from "@mui/material/Typography";
 import { FormattedMessage } from "react-intl";
+import { Link as RouterLink } from "react-router-dom";
 import QuestionMark from "components/QuestionMark";
 import { isEmptyArray } from "utils/arrays";
 import Actions from "../Actions";
@@ -17,6 +18,7 @@ type CardsProps = {
   isDownloadAvailable: boolean;
   isGetIsDownloadAvailableLoading: boolean;
   selectedDataSourceIds: string[];
+  disabledModuleTypes: ReadonlySet<string>;
 };
 
 const useOrderedRecommendations = (recommendations: BaseRecommendation[]) => {
@@ -43,6 +45,7 @@ const Cards = ({
   isDownloadAvailable,
   isGetIsDownloadAvailableLoading,
   selectedDataSourceIds,
+  disabledModuleTypes,
 }: CardsProps) => {
   const orderedRecommendations = useOrderedRecommendations(recommendations);
 
@@ -62,54 +65,86 @@ const Cards = ({
     );
   }
 
-  return orderedRecommendations.map((r) => (
-    <RecommendationCard
-      key={r.type}
-      color={r.color}
-      header={
-        <Header
-          recommendationType={r.type}
-          color={r.color}
-          title={<FormattedMessage id={r.title} />}
-          subtitle={<ServicesChipsGrid services={r.services} />}
-          value={r.value}
-          valueLabel={r.label}
-        />
-      }
-      description={
-        <>
-          <Typography gutterBottom>
-            <FormattedMessage
-              id={r.descriptionMessageId}
-              values={{ strong: (chunks) => <strong>{chunks}</strong>, ...r.descriptionMessageValues }}
-            />
-          </Typography>
-          {r.hasError && (
-            <Box display="flex" alignItems="center">
-              <Typography color="error">
-                <FormattedMessage id="recommendationError" />
-              </Typography>
-              <QuestionMark tooltipText={r.error} color="error" Icon={ErrorOutlineOutlinedIcon} />
+  return orderedRecommendations.map((r) => {
+    const isDisabled = disabledModuleTypes.has(r.type);
+    const card = (
+      <RecommendationCard
+        key={r.type}
+        color={r.color}
+        header={
+          <Header
+            recommendationType={r.type}
+            color={r.color}
+            title={<FormattedMessage id={r.title} />}
+            subtitle={<ServicesChipsGrid services={r.services} />}
+            value={r.value}
+            valueLabel={r.label}
+          />
+        }
+        description={
+          <>
+            <Typography gutterBottom>
+              <FormattedMessage
+                id={r.descriptionMessageId}
+                values={{ strong: (chunks) => <strong>{chunks}</strong>, ...r.descriptionMessageValues }}
+              />
+            </Typography>
+            {r.hasError && (
+              <Box display="flex" alignItems="center">
+                <Typography color="error">
+                  <FormattedMessage id="recommendationError" />
+                </Typography>
+                <QuestionMark tooltipText={r.error} color="error" Icon={ErrorOutlineOutlinedIcon} />
+              </Box>
+            )}
+          </>
+        }
+        cta={r.count > 0 && <FormattedMessage id="seeAllItems" values={{ value: r.count }} />}
+        onCtaClick={() => onRecommendationClick(r)}
+        menu={
+          <Actions
+            downloadLimit={downloadLimit}
+            recommendation={r}
+            withMenu
+            isDownloadAvailable={isDownloadAvailable}
+            isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
+            selectedDataSourceIds={selectedDataSourceIds}
+          />
+        }
+      >
+        {isEmptyArray(r.previewItems) ? null : <TableContent data={r.previewItems.slice(0, 3)} />}
+      </RecommendationCard>
+    );
+    if (!isDisabled) return card;
+    return (
+      <Box key={r.type} sx={{ position: "relative" }}>
+        <Tooltip
+          title={
+            <>
+              <FormattedMessage id="recommendationModuleDisabledTooltip" />{" "}
+              <MuiLink
+                component={RouterLink}
+                to={`/settings?tab=recommendationModules`}
+              >
+                <FormattedMessage id="recommendationModuleDisabledTooltipLink" />
+              </MuiLink>
+            </>
+          }
+        >
+          <span style={{ display: "block" }}>
+            <Box sx={{ opacity: 0.5 }}>
+              {card}
             </Box>
-          )}
-        </>
-      }
-      cta={r.count > 0 && <FormattedMessage id="seeAllItems" values={{ value: r.count }} />}
-      onCtaClick={() => onRecommendationClick(r)}
-      menu={
-        <Actions
-          downloadLimit={downloadLimit}
-          recommendation={r}
-          withMenu
-          isDownloadAvailable={isDownloadAvailable}
-          isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
-          selectedDataSourceIds={selectedDataSourceIds}
+          </span>
+        </Tooltip>
+        <Chip
+          label={<FormattedMessage id="recommendationModuleDisabledBadge" />}
+          size="small"
+          sx={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}
         />
-      }
-    >
-      {isEmptyArray(r.previewItems) ? null : <TableContent data={r.previewItems.slice(0, 3)} />}
-    </RecommendationCard>
-  ));
+      </Box>
+    );
+  });
 };
 
 export default Cards;
