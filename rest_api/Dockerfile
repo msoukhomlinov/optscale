@@ -6,6 +6,12 @@ WORKDIR /usr/src/app/
 COPY tools tools
 COPY optscale_client optscale_client
 
+COPY bumiworker/__init__.py bumiworker/__init__.py
+COPY bumiworker/bumiworker/__init__.py bumiworker/bumiworker/__init__.py
+COPY bumiworker/bumiworker/modules/__init__.py bumiworker/bumiworker/modules/__init__.py
+COPY bumiworker/bumiworker/modules/module.py bumiworker/bumiworker/modules/module.py
+COPY bumiworker/bumiworker/modules/recommendations bumiworker/bumiworker/modules/recommendations
+
 COPY rest_api/__init__.py rest_api/__init__.py
 COPY rest_api/live_demo.tar.xz rest_api/live_demo.tar.xz
 COPY rest_api/google_calendar_client rest_api/google_calendar_client

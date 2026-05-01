@@ -7,8 +7,58 @@ from rest_api.rest_api_server.controllers.base import BaseController
 from rest_api.rest_api_server.controllers.base_async import BaseAsyncControllerWrapper
 from rest_api.rest_api_server.exceptions import Err
 from rest_api.rest_api_server.models.models import OrganizationOption, Organization
+from bumiworker.bumiworker.modules.module import list_modules
 
 LOG = logging.getLogger(__name__)
+
+
+def list_recommendation_module_names():
+    """Discover available recommendation module filenames.
+
+    Indirected through this helper so tests can patch a single symbol
+    inside this controller module instead of the bumiworker import path.
+    """
+    return set(list_modules('recommendations'))
+
+
+def _validate_enabled_modules(value_str):
+    """Validate value for `enabled_recommendation_modules` option.
+
+    Raises WrongArgumentsException on:
+    - Non-string input (defensive -- value reaches here as string)
+    - Malformed JSON
+    - Wrong shape (must be {"types": [str, ...]})
+    - Unknown module names (cross-check vs discovery)
+    """
+    if not isinstance(value_str, str):
+        raise WrongArgumentsException(
+            Err.OE0214, ['enabled_recommendation_modules'])
+    try:
+        parsed = json.loads(value_str)
+    except (ValueError, TypeError):
+        raise WrongArgumentsException(
+            Err.OE0219, ['enabled_recommendation_modules'])
+    if not isinstance(parsed, dict) or 'types' not in parsed:
+        raise WrongArgumentsException(
+            Err.OE0217, ['enabled_recommendation_modules'])
+    types = parsed['types']
+    if not isinstance(types, list) or not all(
+            isinstance(t, str) for t in types):
+        raise WrongArgumentsException(
+            Err.OE0217, ['enabled_recommendation_modules'])
+    discovered = list_recommendation_module_names()
+    unknown = [t for t in types if t not in discovered]
+    if unknown:
+        valid_sorted = sorted(discovered)
+        raise WrongArgumentsException(
+            Err.OE0217,
+            [f'enabled_recommendation_modules: unknown module(s) '
+             f'{unknown!r}. Valid: {valid_sorted}'])
+
+
+KEY_VALIDATORS = {
+    'enabled_recommendation_modules': _validate_enabled_modules,
+}
 
 
 class OrganizationOptionsController(BaseController):
@@ -46,6 +96,9 @@ class OrganizationOptionsController(BaseController):
 
     def patch(self, org_id, option_name, data, is_secret=False):
         self.check_org(org_id)
+        validator = KEY_VALIDATORS.get(option_name)
+        if validator is not None:
+            validator(data)
         options = super().list(organization_id=org_id, name=option_name)
         if len(options) > 1:
             raise WrongArgumentsException(Err.OE0177, [])
