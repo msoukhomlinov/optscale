@@ -329,7 +329,18 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
             self._enabled_modules_cache = _FETCH_FAILED
             self._fetch_failed_exc = exc
             raise exc
-        types = parsed.get('types', [])
+        if 'types' not in parsed:
+            # Missing key is just as malformed as a wrong-typed key —
+            # silently treating it as an empty whitelist would disable every
+            # recommendation module for the org, contradicting the strict
+            # API validator and this function's fail-closed intent.
+            exc = ValueError(
+                'enabled_recommendation_modules: missing required '
+                "'types' key")
+            self._enabled_modules_cache = _FETCH_FAILED
+            self._fetch_failed_exc = exc
+            raise exc
+        types = parsed['types']
         if not isinstance(types, list) or not all(
                 isinstance(t, str) for t in types):
             exc = ValueError(
