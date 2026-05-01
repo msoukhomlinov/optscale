@@ -132,7 +132,8 @@ const Cards = ({
           }
         >
           <span style={{ display: "block" }}>
-            <Box sx={{ opacity: 0.5, pointerEvents: "none" }}>
+            {/* inert blocks all interaction (mouse, keyboard, AT); pointer-events:none is belt-and-suspenders */}
+            <Box sx={{ opacity: 0.5, pointerEvents: "none" }} {...{ inert: "" }}>
               {card}
             </Box>
           </span>

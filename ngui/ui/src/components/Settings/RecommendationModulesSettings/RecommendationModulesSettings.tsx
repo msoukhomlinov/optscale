@@ -70,11 +70,14 @@ const RecommendationModulesSettings = () => {
     const next = new Set(effectiveEnabled);
     if (nextOn) next.add(type);
     else next.delete(type);
-    // Intersect with discovered: stale types from old option rows would be rejected by
-    // the backend validator as unknown modules, blocking all subsequent toggles.
     const discoveredSet = new Set(discovered);
-    const nextArr = Array.from(next).filter((t) => discoveredSet.has(t)).sort();
-    if (nextArr.length === 0) {
+    // Types in the stored option that aren't rendered here (e.g. Nebius modules when
+    // the Nebius connection is removed) may still be valid on the backend — pass them
+    // through unchanged so a visible-module toggle doesn't silently disable them.
+    const passThrough = (enabledTypes ?? []).filter((t) => !discoveredSet.has(t));
+    const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
+    const nextArr = [...passThrough, ...visibleSelected].sort();
+    if (visibleSelected.length === 0) {
       setPendingTypes(nextArr);
       setConfirmEmptyOpen(true);
       return;
