@@ -75,17 +75,20 @@ const RecommendationModulesSettings = () => {
     else next.delete(type);
     setOptimisticEnabled(next);
     const discoveredSet = new Set(discovered);
-    // Carry forward stored types the UI doesn't render here, but only those known
-    // to be backend-valid (Nebius modules when the connection is off). Truly stale
-    // names from renamed/removed modules are dropped client-side so the strict
-    // backend validator (rejects unknowns with OE0217) doesn't bounce the toggle.
-    // When no option row exists (enabledTypes null), seed from NEBIUS_RECOMMENDATION_TYPES
-    // so the first save materialises the implicit "all enabled" default without
-    // silently disabling hidden Nebius modules.
-    const nebiusSet = new Set(NEBIUS_RECOMMENDATION_TYPES);
+    // Carry forward every stored type the UI doesn't render here. Anything already
+    // present in `enabledTypes` came from the backend's strict validator on a prior
+    // write, so it is backend-valid for *some* backend version — preserving it avoids
+    // silently disabling hidden modules during rolling upgrades / frontend-backend
+    // version skew where the backend knows extra recommendation types this UI does
+    // not render. When no option row exists (enabledTypes null) seed from
+    // NEBIUS_RECOMMENDATION_TYPES so the first save materialises the implicit
+    // "all enabled" default without silently disabling hidden Nebius modules.
+    // Trade-off: if a stored type later becomes truly stale (module renamed/removed
+    // in a newer backend), the strict validator (OE0217) will reject the toggle and
+    // surface an error — admin can then save an explicit selection to remediate.
     const passThrough = enabledTypes === null
       ? NEBIUS_RECOMMENDATION_TYPES.filter((t) => !discoveredSet.has(t))
-      : enabledTypes.filter((t) => !discoveredSet.has(t) && nebiusSet.has(t));
+      : enabledTypes.filter((t) => !discoveredSet.has(t));
     const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,
