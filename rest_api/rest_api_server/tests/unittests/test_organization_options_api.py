@@ -179,8 +179,9 @@ class TestCloudAccountApi(TestApiBase):
             'list_recommendation_module_names',
             return_value={'obsolete_ips'}
         ):
-            self.client.organization_option_create(
+            create_code, _ = self.client.organization_option_create(
                 self.org_id1, 'enabled_recommendation_modules', valid_value)
+            self.assertEqual(create_code, 200)
             bad_value = {'value': json.dumps({'types': ['nonexistent_module']})}
             code, resp = self.client.organization_option_update(
                 self.org_id1, 'enabled_recommendation_modules', bad_value)

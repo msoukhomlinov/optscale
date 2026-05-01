@@ -46,7 +46,18 @@ def _validate_enabled_modules(value_str):
             isinstance(t, str) for t in types):
         raise WrongArgumentsException(
             Err.OE0217, ['enabled_recommendation_modules'])
+    if len(types) != len(set(types)):
+        raise WrongArgumentsException(
+            Err.OE0217, ['enabled_recommendation_modules: duplicate module types not allowed'])
     discovered = list_recommendation_module_names()
+    if not discovered:
+        LOG.error(
+            'list_recommendation_module_names returned empty set — '
+            'broken container build or missing recommendations directory')
+        raise WrongArgumentsException(
+            Err.OE0217,
+            ['enabled_recommendation_modules: module discovery returned no modules; '
+             'possible broken container build'])
     unknown = [t for t in types if t not in discovered]
     if unknown:
         valid_sorted = sorted(discovered)
