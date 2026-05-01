@@ -132,7 +132,7 @@ const Cards = ({
           }
         >
           <span style={{ display: "block" }}>
-            <Box sx={{ opacity: 0.5 }}>
+            <Box sx={{ opacity: 0.5, pointerEvents: "none" }}>
               {card}
             </Box>
           </span>
