@@ -74,6 +74,8 @@ def get_handlers(handler_kwargs, version=None):
              h_v2.organization_options.OrganizationOptionsAsyncCollectionHandler, handler_kwargs),
             (urls_v2.organization_options,
              h_v2.organization_options.OrganizationOptionsAsyncItemHandler, handler_kwargs),
+            (urls_v2.organization_recommendation_modules,
+             h_v2.organization_options.OrganizationRecommendationModulesAsyncHandler, handler_kwargs),
             (urls_v2.cloud_account_collection,
              h_v2.cloud_account.CloudAccountAsyncCollectionHandler,
              handler_kwargs),

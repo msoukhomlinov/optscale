@@ -142,6 +142,17 @@ class OrganizationOptionsController(BaseController):
         else:
             super().delete(options[0].id)
 
+    def list_discovered_recommendation_modules(self, org_id):
+        # Org-scoped only for permission/auth alignment with the rest of this
+        # controller; the discovered set itself is global to the deployment.
+        # Frontend uses this to filter the `enabled_recommendation_modules`
+        # whitelist against the backend's currently-known module set so stale
+        # names left over from rename/removal don't poison every save with
+        # OE0217, and so first-toggle (no stored row) can preserve hidden but
+        # backend-valid modules instead of dropping them on version skew.
+        self.check_org(org_id)
+        return sorted(list_recommendation_module_names())
+
 
 class OrganizationOptionsAsyncController(BaseAsyncControllerWrapper):
     def _get_controller_class(self):

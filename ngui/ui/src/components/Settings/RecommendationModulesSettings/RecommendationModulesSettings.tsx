@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -19,8 +19,10 @@ import {
 } from "@mui/material";
 import { FormattedMessage, useIntl } from "react-intl";
 import { useIsAllowed } from "hooks/useAllowedActions";
-import { useOptscaleRecommendations, NEBIUS_RECOMMENDATION_TYPES } from "hooks/useOptscaleRecommendations";
+import { useApiState } from "hooks/useApiState";
+import { useOptscaleRecommendations } from "hooks/useOptscaleRecommendations";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
+import { UPDATE_ORGANIZATION_OPTION } from "api/restapi/actionTypes";
 import { ALIBABA_CNR, AWS_CNR, AZURE_CNR, GCP_CNR, NEBIUS } from "utils/constants";
 
 const CLOUD_LABEL: Record<string, string> = {
@@ -38,6 +40,7 @@ const RecommendationModulesSettings = () => {
   const {
     hasFetched,
     enabledTypes,
+    discoveredBackend,
     fetchOption,
     updateTypes,
   } = useRecommendationModulesOption();
@@ -55,6 +58,26 @@ const RecommendationModulesSettings = () => {
     setOptimisticEnabled(null);
   }, [enabledTypes]);
 
+  // Optimistic rollback on save failure. The redux api middleware swallows
+  // request errors and resolves the dispatch promise after dispatching
+  // `apiError`, so `dispatch(updateOrganizationOption(...)).catch(...)` never
+  // fires — instead we observe a load→error transition via useApiState and
+  // clear optimistic state then.
+  const { isLoading: isUpdating, isError: isUpdateError } = useApiState(UPDATE_ORGANIZATION_OPTION);
+  const wasUpdatingRef = useRef(false);
+  useEffect(() => {
+    if (isUpdating) {
+      wasUpdatingRef.current = true;
+      return;
+    }
+    if (wasUpdatingRef.current) {
+      wasUpdatingRef.current = false;
+      if (isUpdateError) {
+        setOptimisticEnabled(null);
+      }
+    }
+  }, [isUpdating, isUpdateError]);
+
   const discovered = useMemo(
     () => Object.keys(recommendationsByType).sort(),
     [recommendationsByType]
@@ -66,7 +89,10 @@ const RecommendationModulesSettings = () => {
   );
 
   const submit = (nextTypes: string[]) => {
-    (updateTypes(nextTypes) as Promise<unknown>).catch(() => setOptimisticEnabled(null));
+    updateTypes(nextTypes);
+    // Rollback on failure happens via the isUpdateError effect above — the
+    // redux api middleware doesn't reject the dispatch promise, so attaching
+    // a .catch here would silently never fire.
   };
 
   const handleToggle = (type: string, nextOn: boolean) => {
@@ -75,20 +101,22 @@ const RecommendationModulesSettings = () => {
     else next.delete(type);
     setOptimisticEnabled(next);
     const discoveredSet = new Set(discovered);
-    // Carry forward every stored type the UI doesn't render here. Anything already
-    // present in `enabledTypes` came from the backend's strict validator on a prior
-    // write, so it is backend-valid for *some* backend version — preserving it avoids
-    // silently disabling hidden modules during rolling upgrades / frontend-backend
-    // version skew where the backend knows extra recommendation types this UI does
-    // not render. When no option row exists (enabledTypes null) seed from
-    // NEBIUS_RECOMMENDATION_TYPES so the first save materialises the implicit
-    // "all enabled" default without silently disabling hidden Nebius modules.
-    // Trade-off: if a stored type later becomes truly stale (module renamed/removed
-    // in a newer backend), the strict validator (OE0217) will reject the toggle and
-    // surface an error — admin can then save an explicit selection to remediate.
+    // Pass-through = stored types this UI doesn't render but the backend
+    // currently knows about. Filtering against `discoveredBackend` (fetched
+    // from the new GET /recommendation_modules endpoint) drops:
+    //   - stale names from renamed/removed modules so a strict validator
+    //     (OE0217) doesn't bounce every save and lock the toggle out;
+    // and preserves:
+    //   - hidden-but-valid modules (eg Nebius types when no Nebius
+    //     connection exists) across rolling upgrades / version skew where the
+    //     backend knows recommendation types this UI does not render.
+    // When no option row exists (enabledTypes null) seed from the same
+    // backend-known set minus what this UI renders, so the first save
+    // materialises the implicit "all enabled" default without silently
+    // disabling hidden modules.
     const passThrough = enabledTypes === null
-      ? NEBIUS_RECOMMENDATION_TYPES.filter((t) => !discoveredSet.has(t))
-      : enabledTypes.filter((t) => !discoveredSet.has(t));
+      ? Array.from(discoveredBackend).filter((t) => !discoveredSet.has(t))
+      : enabledTypes.filter((t) => !discoveredSet.has(t) && discoveredBackend.has(t));
     const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,

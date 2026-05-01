@@ -3,6 +3,7 @@ import { removeObjects } from "utils/arrays";
 import {
   SET_ORGANIZATION_OPTIONS,
   SET_ORGANIZATION_OPTION,
+  SET_DISCOVERED_RECOMMENDATION_MODULES,
   SET_ORGANIZATION_CONSTRAINTS,
   SET_POOL,
   SET_ORGANIZATIONS_OVERVIEW,
@@ -134,6 +135,12 @@ const reducer = (state = {}, action) => {
       return {
         ...state,
         [action.label]: action.payload.value,
+      };
+    }
+    case SET_DISCOVERED_RECOMMENDATION_MODULES: {
+      return {
+        ...state,
+        [action.label]: action.payload.types,
       };
     }
     case UPDATE_POOL_EXPENSES_EXPORT: {

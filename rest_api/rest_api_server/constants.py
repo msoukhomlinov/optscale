@@ -19,6 +19,7 @@ class UrlsV2(Urls):
         'organizations': r"%s/organizations/(?P<id>[^/]+)",
         'organization_options_collection': r"%s/organizations/(?P<organization_id>[^/]+)/options",
         'organization_options': r"%s/organizations/(?P<organization_id>[^/]+)/options/(?P<option_name>[^/]+)",
+        'organization_recommendation_modules': r"%s/organizations/(?P<organization_id>[^/]+)/recommendation_modules",
         'organization_subscription': r"%s/organizations/(?P<organization_id>[^/]+)/subscription",
         'organization_summary': r"%s/organizations/(?P<organization_id>[^/]+)/summary",
         'subscription_plans': r"%s/organizations/(?P<organization_id>[^/]+)/subscription_plans",

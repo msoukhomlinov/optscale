@@ -12,6 +12,8 @@ import {
   UPDATE_ORGANIZATION_OPTION,
   CREATE_ORGANIZATION_OPTION,
   SET_ORGANIZATION_OPTION,
+  GET_DISCOVERED_RECOMMENDATION_MODULES,
+  SET_DISCOVERED_RECOMMENDATION_MODULES,
   UPDATE_DATA_SOURCE,
   SET_POOL,
   UPDATE_POOL,
@@ -365,6 +367,16 @@ export const getOrganizationOption = (organizationId, name) =>
     onSuccess: handleSuccess(SET_ORGANIZATION_OPTION),
     hash: hashParams({ organizationId, name }),
     label: GET_ORGANIZATION_OPTION,
+  });
+
+export const getDiscoveredRecommendationModules = (organizationId) =>
+  apiAction({
+    url: `${API_URL}/organizations/${organizationId}/recommendation_modules`,
+    method: "GET",
+    ttl: 5 * MINUTE,
+    onSuccess: handleSuccess(SET_DISCOVERED_RECOMMENDATION_MODULES),
+    hash: hashParams({ organizationId }),
+    label: GET_DISCOVERED_RECOMMENDATION_MODULES,
   });
 
 export const deleteOrganizationOption = (organizationId, name) =>
