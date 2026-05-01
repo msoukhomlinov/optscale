@@ -3,6 +3,7 @@ import os
 import uuid
 
 import boto3
+import requests
 from boto3.session import Config as BotoConfig
 
 from kombu.log import get_logger
@@ -23,6 +24,10 @@ BUCKET_NAME = 'bumi-data'
 SERVICE_FOLDER = 'service'
 ARCHIVE_FOLDER = 'archive'
 RECOMMENDATION_FOLDER = 'recommendations'
+
+_UNSET = object()
+_FETCH_FAILED = object()
+ENABLED_MODULES_OPTION_KEY = 'enabled_recommendation_modules'
 
 
 def task_str(task):
@@ -58,6 +63,10 @@ class Base(object):
                 url=self.config_cl.restapi_url(), verify=False)
             self._rest_cl.secret = self.config_cl.cluster_secret()
         return self._rest_cl
+
+    @rest_cl.setter
+    def rest_cl(self, value):
+        self._rest_cl = value
 
     @property
     def s3_client(self):
@@ -267,6 +276,12 @@ class SetStarted(CheckTimeoutThreshold):
 
 
 class InitializeChildrenBase(CheckTimeoutThreshold):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._enabled_modules_cache = _UNSET
+        self._stale_warned = set()
+        self._fetch_error_logged = False
+
     @property
     def module_type(self):
         raise NotImplementedError
@@ -274,13 +289,77 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
     def update_task_state(self):
         raise NotImplementedError
 
+    def _fetch_enabled_modules_whitelist(self):
+        """Fetch per-org whitelist option; cache for instance lifetime.
+
+        Returns:
+            None if option row absent (lazy default → no whitelist enforcement)
+            set[str] of whitelisted module names if present
+        Raises:
+            requests.HTTPError on transport failure
+        """
+        if self._enabled_modules_cache is not _UNSET:
+            if self._enabled_modules_cache is _FETCH_FAILED:
+                raise RuntimeError('cached fetch failure')
+            return self._enabled_modules_cache
+        org_id = self.body['organization_id']
+        try:
+            _, resp = self.rest_cl.organization_option_get(
+                org_id, ENABLED_MODULES_OPTION_KEY)
+        except requests.HTTPError:
+            self._enabled_modules_cache = _FETCH_FAILED
+            raise
+        raw_value = resp.get('value', '{}')
+        if raw_value == '{}':
+            self._enabled_modules_cache = None
+            return None
+        parsed = json.loads(raw_value)
+        whitelist = set(parsed.get('types', []))
+        self._enabled_modules_cache = whitelist
+        return whitelist
+
     def list_modules(self, module_type):
         modules = list_modules(module_type)
+        # Preserve existing global filter verbatim.
         disabled = set(self.config_cl.disabled_recommendations() or [])
         filtered = [m for m in modules if m not in disabled]
-        skipped = [m for m in modules if m in disabled]
-        LOG.info("[disabled modules] %s::%s", module_type, skipped)
-        return filtered
+        skipped_global = [m for m in modules if m in disabled]
+        LOG.info("[disabled modules] %s::%s", module_type, skipped_global)
+
+        # Per-org gate: only applies to RECOMMENDATION_FOLDER.
+        if module_type != RECOMMENDATION_FOLDER:
+            return filtered
+
+        org_id = self.body['organization_id']
+        try:
+            whitelist = self._fetch_enabled_modules_whitelist()
+        except Exception as e:
+            if not self._fetch_error_logged:
+                LOG.error(
+                    'option fetch failed for org=%s key=%s: %s',
+                    org_id, ENABLED_MODULES_OPTION_KEY, e)
+                self._fetch_error_logged = True
+            return []
+
+        if whitelist is None:
+            # Lazy default: absent row → all enabled.
+            return filtered
+
+        filtered_set = set(filtered)
+        # Stale: in whitelist but not in discovered modules.
+        for stale in whitelist - set(modules):
+            if stale not in self._stale_warned:
+                LOG.warning(
+                    'module=%s stale (in option, not discovered) for org=%s',
+                    stale, org_id)
+                self._stale_warned.add(stale)
+        # Skipped: discovered and not globally disabled but not in whitelist.
+        for m in filtered_set - whitelist:
+            LOG.info(
+                'module=%s skipped (not enabled by org option) for org=%s',
+                m, org_id)
+        enabled = filtered_set & whitelist
+        return [m for m in filtered if m in enabled]
 
     def _get_child_task(self, module):
         return {
