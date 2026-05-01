@@ -82,20 +82,15 @@ const RecommendationModulesSettings = () => {
     else next.delete(type);
     setOptimisticEnabled(next);
     const discoveredSet = new Set(discovered);
-    // Build the passThrough list — module types that exist on the backend but are not
-    // currently rendered in this UI (e.g. Nebius modules when the connection is off).
-    //
-    // Two cases:
-    // 1. No row yet (enabledTypes null) — the implicit default is "all enabled".
-    //    Materialise that by seeding passThrough with Nebius types not already visible,
-    //    so the first explicit save doesn't silently disable hidden-but-valid modules.
-    // 2. Row exists — carry forward only non-visible stored types that are in the
-    //    always-valid Nebius set.  Stale/renamed module names are dropped here to
-    //    prevent OE0217 from the backend unknown-module validator.
-    const nebiusSet = new Set(NEBIUS_RECOMMENDATION_TYPES);
-    const passThrough = enabledTypes === null
-      ? NEBIUS_RECOMMENDATION_TYPES.filter((t) => !discoveredSet.has(t))
-      : enabledTypes.filter((t) => !discoveredSet.has(t) && nebiusSet.has(t));
+    // Carry forward every stored type the UI doesn't render here — Nebius modules
+    // when the connection is off, custom modules from a future backend, or anything
+    // else the org has explicitly enabled. The backend validator strips truly stale
+    // names (warn-and-strip) so we don't need to filter here. When no option row
+    // exists yet (enabledTypes null), seed the implicit "all enabled" default with
+    // hidden Nebius types so the first save doesn't silently disable them.
+    const passThrough = (enabledTypes ?? NEBIUS_RECOMMENDATION_TYPES).filter(
+      (t) => !discoveredSet.has(t)
+    );
     const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,

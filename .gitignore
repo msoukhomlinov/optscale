@@ -29,3 +29,7 @@ jira_ui/*/build/
 
 # Vagrant
 optscale-deploy/.vagrant/
+
+# Fork-local docs and Claude Code workspace state — keep out of upstream
+CLAUDE.md
+.claude/memory/

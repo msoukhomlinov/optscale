@@ -22,13 +22,21 @@ def list_recommendation_module_names():
 
 
 def _validate_enabled_modules(value_str):
-    """Validate value for `enabled_recommendation_modules` option.
+    """Validate / sanitise the `enabled_recommendation_modules` option value.
 
     Raises WrongArgumentsException on:
     - Non-string input (defensive -- value reaches here as string)
     - Malformed JSON
     - Wrong shape (must be {"types": [str, ...]})
-    - Unknown module names (cross-check vs discovery)
+
+    Unknown module names are *not* fatal: they're stripped from the saved value
+    and a warning is logged. This keeps the option robust against staggered
+    rollouts where a frontend sends types it knows about but the backend hasn't
+    deployed yet, against legacy data with renamed/removed modules, and against
+    staleness in the option after a downgrade.
+
+    Returns the sanitised JSON string when types were stripped, otherwise None
+    (caller treats None as "use original value unchanged").
     """
     if not isinstance(value_str, str):
         raise WrongArgumentsException(
@@ -59,12 +67,13 @@ def _validate_enabled_modules(value_str):
             ['enabled_recommendation_modules: module discovery returned no modules; '
              'possible broken container build'])
     unknown = [t for t in types if t not in discovered]
-    if unknown:
-        valid_sorted = sorted(discovered)
-        raise WrongArgumentsException(
-            Err.OE0217,
-            [f'enabled_recommendation_modules: unknown module(s) '
-             f'{unknown!r}. Valid: {valid_sorted}'])
+    if not unknown:
+        return None
+    LOG.warning(
+        'enabled_recommendation_modules: stripping unknown module(s) %r; '
+        'known modules: %r', unknown, sorted(discovered))
+    sanitised_types = [t for t in types if t in discovered]
+    return json.dumps({'types': sanitised_types})
 
 
 KEY_VALIDATORS = {
@@ -109,7 +118,9 @@ class OrganizationOptionsController(BaseController):
         self.check_org(org_id)
         validator = KEY_VALIDATORS.get(option_name)
         if validator is not None:
-            validator(data)
+            sanitised = validator(data)
+            if sanitised is not None:
+                data = sanitised
         options = super().list(organization_id=org_id, name=option_name)
         if len(options) > 1:
             raise WrongArgumentsException(Err.OE0177, [])
