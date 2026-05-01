@@ -32,7 +32,7 @@ const CLOUD_LABEL: Record<string, string> = {
 
 const RecommendationModulesSettings = () => {
   const intl = useIntl();
-  const recommendationsByType = useOptscaleRecommendations({ withDeprecated: true });
+  const recommendationsByType = useOptscaleRecommendations();
   const {
     isLoading,
     optionRowExists,
