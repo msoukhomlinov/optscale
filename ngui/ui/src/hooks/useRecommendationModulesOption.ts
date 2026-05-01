@@ -31,7 +31,7 @@ export const useRecommendationModulesOption = () => {
   // before submitting (avoids stale rename/removal entries blocking saves)
   // and use it to seed the first-toggle payload (avoids silently disabling
   // hidden-but-valid modules during frontend/backend version skew).
-  const { isLoading: isLoadingDiscovered } = useApiState(
+  const { isLoading: isLoadingDiscovered, isError: isDiscoveredError } = useApiState(
     GET_DISCOVERED_RECOMMENDATION_MODULES
   );
   const { apiData: discoveredBackendList } = useApiData(
@@ -71,10 +71,15 @@ export const useRecommendationModulesOption = () => {
   useEffect(() => {
     if (isLoadingDiscovered) {
       wasDiscoveryLoadingRef.current = true;
-    } else if (wasDiscoveryLoadingRef.current) {
+    } else if (wasDiscoveryLoadingRef.current && !isDiscoveredError) {
+      // Only flip hasFetchedDiscovered when the request actually succeeded.
+      // On error, leave it false so toggles stay blocked — the empty default
+      // would otherwise be indistinguishable from "backend has no modules"
+      // and the passThrough filter would silently drop every hidden module
+      // type from a stored whitelist.
       setHasFetchedDiscovered(true);
     }
-  }, [isLoadingDiscovered]);
+  }, [isLoadingDiscovered, isDiscoveredError]);
 
   // Toggles must wait for BOTH the option row and backend discovery — the
   // discovery list is needed to filter stale stored types and to seed the
@@ -113,6 +118,7 @@ export const useRecommendationModulesOption = () => {
   return {
     isLoading,
     hasFetched,
+    discoveryFailed: isDiscoveredError && !isLoadingDiscovered,
     optionRowExists,
     enabledTypes: parsed?.types ?? null,
     discoveredBackend,
