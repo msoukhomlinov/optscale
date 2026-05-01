@@ -18,6 +18,7 @@ import {
   Typography,
 } from "@mui/material";
 import { FormattedMessage, useIntl } from "react-intl";
+import { useIsAllowed } from "hooks/useAllowedActions";
 import { useOptscaleRecommendations } from "hooks/useOptscaleRecommendations";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 import { ALIBABA_CNR, AWS_CNR, AZURE_CNR, GCP_CNR, NEBIUS } from "utils/constants";
@@ -32,6 +33,7 @@ const CLOUD_LABEL: Record<string, string> = {
 
 const RecommendationModulesSettings = () => {
   const intl = useIntl();
+  const isEditAllowed = useIsAllowed({ requiredActions: ["EDIT_PARTNER"] });
   const recommendationsByType = useOptscaleRecommendations();
   const {
     isLoading,
@@ -76,13 +78,14 @@ const RecommendationModulesSettings = () => {
     // through unchanged so a visible-module toggle doesn't silently disable them.
     const passThrough = (enabledTypes ?? []).filter((t) => !discoveredSet.has(t));
     const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
-    const nextArr = [...passThrough, ...visibleSelected].sort();
     if (visibleSelected.length === 0) {
-      setPendingTypes(nextArr);
+      // Submit [] on confirm so ALL modules (including hidden) are truly disabled,
+      // matching the "silence ALL recommendation modules" dialog wording.
+      setPendingTypes([]);
       setConfirmEmptyOpen(true);
       return;
     }
-    submit(nextArr);
+    submit([...passThrough, ...visibleSelected].sort());
   };
 
   if (isLoading && !optionRowExists) {
@@ -167,6 +170,7 @@ const RecommendationModulesSettings = () => {
                   <Switch
                     checked={effectiveEnabled.has(type)}
                     onChange={(_, checked) => handleToggle(type, checked)}
+                    disabled={!isEditAllowed}
                     inputProps={{
                       "aria-label": intl.formatMessage({ id: titleKey }),
                     }}
