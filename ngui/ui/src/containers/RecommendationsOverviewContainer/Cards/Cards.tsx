@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import ErrorOutlineOutlinedIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import { Box, Chip, Link as MuiLink, Tooltip } from "@mui/material";
 import Typography from "@mui/material/Typography";
@@ -69,7 +70,6 @@ const Cards = ({
     const isDisabled = disabledModuleTypes.has(r.type);
     const card = (
       <RecommendationCard
-        key={r.type}
         color={r.color}
         header={
           <Header
@@ -115,7 +115,7 @@ const Cards = ({
         {isEmptyArray(r.previewItems) ? null : <TableContent data={r.previewItems.slice(0, 3)} />}
       </RecommendationCard>
     );
-    if (!isDisabled) return card;
+    if (!isDisabled) return <Fragment key={r.type}>{card}</Fragment>;
     return (
       <Box key={r.type} sx={{ position: "relative" }}>
         <Tooltip

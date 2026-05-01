@@ -89,13 +89,17 @@ const RecommendationsOverview = ({
   const { classes } = useStyles();
   const checkDone = lastCompleted !== 0;
 
-  const recommendations = Object.values(recommendationClasses)
-    .map((RecommendationClass) => new RecommendationClass(STATUS.ACTIVE, recommendationsData))
-    .filter(categoryFilter(category))
-    .filter(serviceFilter(service))
-    .filter(searchFilter(search))
-    .filter(appliedDataSourcesFilter(selectedDataSourceTypes))
-    .sort(sortRecommendation);
+  const recommendations = useMemo(
+    () =>
+      Object.values(recommendationClasses)
+        .map((RecommendationClass) => new RecommendationClass(STATUS.ACTIVE, recommendationsData))
+        .filter(categoryFilter(category))
+        .filter(serviceFilter(service))
+        .filter(searchFilter(search))
+        .filter(appliedDataSourcesFilter(selectedDataSourceTypes))
+        .sort(sortRecommendation),
+    [recommendationClasses, recommendationsData, category, service, search, selectedDataSourceTypes]
+  );
 
   const { enabledTypes, optionRowExists, fetchOption } = useRecommendationModulesOption();
   useEffect(() => { fetchOption(); }, [fetchOption]);
