@@ -15,7 +15,6 @@ import {
   TableCell,
   TableHead,
   TableRow,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import { FormattedMessage, useIntl } from "react-intl";
@@ -92,6 +91,9 @@ const RecommendationModulesSettings = () => {
       <Typography variant="body2">
         <FormattedMessage id="recommendationModuleTabSubtitle" />
       </Typography>
+      <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
+        <FormattedMessage id="recommendationModuleApiCallsNote" />
+      </Alert>
       {newModuleCount > 0 && (
         <Alert severity="info">
           <FormattedMessage
@@ -105,11 +107,7 @@ const RecommendationModulesSettings = () => {
           <TableRow>
             <TableCell><FormattedMessage id="name" /></TableCell>
             <TableCell><FormattedMessage id="recommendationModuleColCloud" /></TableCell>
-            <TableCell>
-              <Tooltip title={intl.formatMessage({ id: "recommendationModuleTabSubtitle" })}>
-                <span><FormattedMessage id="recommendationModuleColApiCalls" /></span>
-              </Tooltip>
-            </TableCell>
+            <TableCell><FormattedMessage id="recommendationModuleColApiCalls" /></TableCell>
             <TableCell align="right"><FormattedMessage id="recommendationModuleColEnabled" /></TableCell>
           </TableRow>
         </TableHead>

@@ -53,6 +53,8 @@ class IntelligentTiering extends BaseRecommendation {
 
   categories = [CATEGORY.COST];
 
+  apiCallInfo = "AWS CloudWatch GetMetricStatistics (~1 call/bucket/run)";
+
   withExclusions = true;
 
   static resourceDescriptionMessageId = "intelligentTieringResourceRecommendation";
