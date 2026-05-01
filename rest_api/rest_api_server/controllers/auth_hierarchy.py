@@ -85,11 +85,16 @@ class AuthHierarchyController(object):
         Root-type assignments in the auth service have no scope_id — the
         assignee has access to everything.  The auth service calls
         auth_hierarchy_get('root', None) so it can expand that assignment into
-        concrete (type, resource_id) pairs via render().  We return the same
-        ``{'organization': {org_id: {'pool': [pool_id, ...]}, ...}}`` shape
-        used by the 'organization' branch, but without any scope filter.
+        concrete (type, resource_id) pairs via render().
+
+        The auth service's render() expects the shape:
+            {'root': {'null': {'organization': {org_id: {'pool': [pool_id, ...]}, ...}}}}
+
+        The outer 'root' key matches the first ordered Type.  The 'null' key
+        is the sentinel the render() loop uses to seed id_item_hierarchy_map
+        for the root level (parent_id=None → 'null').
         """
-        result = {'organization': {}}
+        orgs = {}
         sql = self.session.query(Organization.id, Pool.id).outerjoin(
             Pool, and_(
                 Pool.organization_id == Organization.id,
@@ -97,11 +102,11 @@ class AuthHierarchyController(object):
         ).filter(Organization.deleted.is_(False))
         for organization_id, pool_id in sql.order_by(
                 Organization.id, Pool.id).all():
-            if organization_id not in result['organization']:
-                result['organization'][organization_id] = {'pool': []}
+            if organization_id not in orgs:
+                orgs[organization_id] = {'pool': []}
             if pool_id is not None:
-                result['organization'][organization_id]['pool'].append(pool_id)
-        return result
+                orgs[organization_id]['pool'].append(pool_id)
+        return {'root': {'null': {'organization': orgs}}}
 
     def on_finish(self):
         pass
