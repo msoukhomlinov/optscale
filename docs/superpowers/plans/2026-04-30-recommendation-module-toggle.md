@@ -128,7 +128,13 @@ This copies only the discovery machinery + recommendation module Python files (n
 
 Verify the `__init__.py` files exist (create empty ones if missing):
 ```bash
-ls bumiworker/__init__.py bumiworker/bumiworker/__init__.py bumiworker/bumiworker/modules/__init__.py
+for f in bumiworker/__init__.py \
+          bumiworker/bumiworker/__init__.py \
+          bumiworker/bumiworker/modules/__init__.py; do
+  test -f "$f" || touch "$f"
+done
+ls bumiworker/__init__.py bumiworker/bumiworker/__init__.py \
+   bumiworker/bumiworker/modules/__init__.py
 ```
 
 - [ ] **Step 1: Write failing test for happy-path validator (create path)**
@@ -211,14 +217,18 @@ def test_other_options_unaffected_by_validator(self):
 
 Note: Permission guards (EDIT_PARTNER for PATCH, INFO_ORGANIZATION for GET) are verified at handler line numbers in Phase 0 and enforced by the existing handler framework — no unit test needed here. `TestApiBase.get_client` does not accept `user_id`, so permission tests in this file require a different base pattern; omitted to avoid unworkable stubs.
 
-- [ ] **Step 2: Run tests — verify 6 fail (7th regression-guard passes pre-implementation)**
+- [ ] **Step 2: Run tests — verify 4 fail, 3 pass pre-implementation**
 
 ```bash
 cd /home/iitadmin/optscale-fork
 python3 -m pytest rest_api/rest_api_server/tests/unittests/test_organization_options_api.py -v -k enabled_recommendation_modules
 ```
 
-Expected: 6 tests FAIL (validator not yet implemented — happy paths fail because module-name lookup helper doesn't exist; bad-input tests fail because controller currently accepts anything). The `test_other_options_unaffected_by_validator` test PASSES already (no validator = no filtering = any option accepted). Leave it as a regression guard for the next step.
+Expected pre-implementation:
+- **PASS already** (3): `test_enabled_recommendation_modules_create_valid` (expects 200, gets 200), `test_enabled_recommendation_modules_empty_types_allowed` (expects 200, gets 200), `test_other_options_unaffected_by_validator` (no validator = any option accepted)
+- **FAIL** (4): `create_unknown_module`, `update_unknown_module`, `malformed_json`, `wrong_shape` — all expect 400 but controller currently accepts any value without validation
+
+Leave all 3 passing tests as regression guards. All 7 must pass after implementation.
 
 - [ ] **Step 3: Implement validator + dispatch in controller**
 
@@ -568,14 +578,6 @@ _UNSET = object()
 _FETCH_FAILED = object()
 ```
 
-Also add `_fetch_error_logged` instance flag alongside `_enabled_modules_cache` in `__init__`:
-
-```python
-self._enabled_modules_cache = _UNSET
-self._stale_warned = set()
-self._fetch_error_logged = False
-```
-
 And in `list_modules`, dedupe the ERROR log:
 
 ```python
@@ -675,15 +677,7 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         return [m for m in filtered if m in enabled]
 ```
 
-Initialize cache attrs in `InitializeChildrenBase.__init__`. If `__init__` doesn't exist on this class, add it or override it. The base class `__init__` is at the top-level `Task` class which accepts `body` — read `tasks.py:40-50` to identify where `self.body` is set, then add the two sentinel attrs immediately after:
-
-```python
-# Immediately after self.body = body (or wherever the parent sets it):
-self._enabled_modules_cache = _UNSET
-self._stale_warned = set()
-```
-
-If `InitializeChildrenBase` doesn't override `__init__`, add:
+`InitializeChildrenBase` has NO existing `__init__` (verified). Add one:
 
 ```python
 class InitializeChildrenBase(CheckTimeoutThreshold):
@@ -691,6 +685,7 @@ class InitializeChildrenBase(CheckTimeoutThreshold):
         super().__init__(*args, **kwargs)
         self._enabled_modules_cache = _UNSET
         self._stale_warned = set()
+        self._fetch_error_logged = False
 ```
 
 - [ ] **Step 5: Run tests — verify all pass**
@@ -801,6 +796,15 @@ grep -rn "GET_ORGANIZATION_OPTION\|organization_option_get\|organizationOptionGe
 
 Confirm: the rest_api controller's `get_by_name` returns `'{}'` (empty JSON object string) when no row exists — the API does NOT return 404 for the GET path. So on "absent row", the saga receives a 200 with `value = '{}'`. The hook's `optionRowExists` check (`rawValue !== "{}"`) correctly distinguishes this sentinel. Match existing `OrganizationOptionsService` behavior exactly to confirm the saga writes the `rawValue` to the store on success.
 
+- [ ] **Step 1.6: Verify saga writes to both `api[label]` and `RESTAPI[label]` store slices**
+
+```bash
+grep -n "GET_ORGANIZATION_OPTION\|put.*GET_ORGANIZATION\|apiData\|RESTAPI" \
+  ngui/ui/src/sagas/organization*.{ts,js} 2>/dev/null | head -30
+```
+
+Confirm that the saga handling `GET_ORGANIZATION_OPTION` writes into the same slice that `useApiData(GET_ORGANIZATION_OPTION, null)` reads from. If the saga uses a different action label or writes to a different slice key, adjust the hook's `useApiData` call and/or `useApiState` call to match the actual saga output. Mismatch = `rawValue` stays `null` forever, no toggle state visible.
+
 - [ ] **Step 2: Create hook following identified pattern**
 
 Create `ngui/ui/src/hooks/useRecommendationModulesOption.ts`. The hook MUST mirror `OrganizationOptionsService` (verified in Step 1 + 1.5).
@@ -837,6 +841,9 @@ export const useRecommendationModulesOption = () => {
   const { isLoading } = useApiState(GET_ORGANIZATION_OPTION);
   // rawValue lifecycle: null (pre-fetch, default) → '{}' (absent row sentinel) → JSON-string (present row).
   // Component distinguishes null-pre-fetch via isLoading, not optionRowExists.
+  // KNOWN LIMITATION: GET_ORGANIZATION_OPTION is a shared store label. If any other component
+  // fetches a different option name, rawValue may reflect that option instead. Acceptable in v1:
+  // only this hook uses this action label. Document if a second option consumer is added.
   const { apiData: rawValue } = useApiData(GET_ORGANIZATION_OPTION, null);
 
   // optionRowExists: controller returns '{}' when no row exists (not 404).
@@ -844,10 +851,21 @@ export const useRecommendationModulesOption = () => {
   const optionRowExists = typeof rawValue === "string" && rawValue.length > 0 && rawValue !== "{}";
 
   // parseJSON never throws — it returns fallback on parse error.
-  const parsed = useMemo<EnabledModulesValue | null>(
-    () => (optionRowExists ? (parseJSON(rawValue, null) as EnabledModulesValue | null) : null),
-    [rawValue, optionRowExists]
-  );
+  // IMPORTANT: if optionRowExists=true but parse fails (corrupt DB row), parsed=null.
+  // null means "lazy default → all modules enabled" — safe degradation (no silent deny).
+  // Log a console.warn so operators can detect corrupt rows without breaking the UI.
+  const parsed = useMemo<EnabledModulesValue | null>(() => {
+    if (!optionRowExists) return null;
+    const result = parseJSON(rawValue, null) as EnabledModulesValue | null;
+    if (result === null) {
+      // Row exists but value is not valid JSON — degrade to "all enabled" and warn.
+      console.warn(
+        "[useRecommendationModulesOption] corrupt option row — rawValue is not valid JSON; " +
+        "defaulting to all-enabled. Fix the row via DELETE /organizations/.../options/enabled_recommendation_modules"
+      );
+    }
+    return result;
+  }, [rawValue, optionRowExists]);
 
   const fetchOption = useCallback(() => {
     dispatch(getOrganizationOption(organizationId, OPTION_KEY));
@@ -1213,7 +1231,7 @@ return orderedRecommendations.map((r) => {
 });
 ```
 
-Add `Chip` and `Tooltip` to the MUI import line: `import { Box, Chip, Tooltip } from "@mui/material";` (Cards.tsx does not import Badge — nothing to remove).
+Merge all new MUI symbols into the existing `@mui/material` import line: `import { Box, Chip, Tooltip, Link as MuiLink } from "@mui/material";`. Also add `import { Link as RouterLink } from "react-router-dom";` and `import { SETTINGS_TABS } from "utils/constants";` if not already present.
 
 - [ ] **Step 3: Wire up `disabledModuleTypes` prop in `RecommendationsOverview.tsx`**
 
@@ -1225,7 +1243,8 @@ Read `ngui/ui/src/containers/RecommendationsOverviewContainer/RecommendationsOve
 import { useEffect, useMemo } from "react";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 
-// inside the component:
+// Insert AFTER the `const recommendations = Object.values(...)` block and BEFORE the `return (` statement.
+// Hooks must be at component top-level (unconditional); placement after a const is legal.
 const { enabledTypes, optionRowExists, fetchOption } = useRecommendationModulesOption();
 useEffect(() => { fetchOption(); }, [fetchOption]);
 const disabledModuleTypes = useMemo<ReadonlySet<string>>(() => {
