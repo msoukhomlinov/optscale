@@ -66,12 +66,6 @@ const RecommendationModulesSettings = () => {
     [optimisticEnabled, enabledTypes, discovered]
   );
 
-  const newModuleCount = useMemo(() => {
-    if (!optionRowExists || enabledTypes === null) return 0;
-    const stored = new Set(enabledTypes);
-    return discovered.filter((t) => !stored.has(t)).length;
-  }, [optionRowExists, enabledTypes, discovered]);
-
   const submit = (nextTypes: string[]) => {
     (updateTypes(nextTypes) as Promise<unknown>).catch(() => setOptimisticEnabled(null));
   };
@@ -82,15 +76,17 @@ const RecommendationModulesSettings = () => {
     else next.delete(type);
     setOptimisticEnabled(next);
     const discoveredSet = new Set(discovered);
-    // Carry forward every stored type the UI doesn't render here — Nebius modules
-    // when the connection is off, custom modules from a future backend, or anything
-    // else the org has explicitly enabled. The backend validator strips truly stale
-    // names (warn-and-strip) so we don't need to filter here. When no option row
-    // exists yet (enabledTypes null), seed the implicit "all enabled" default with
-    // hidden Nebius types so the first save doesn't silently disable them.
-    const passThrough = (enabledTypes ?? NEBIUS_RECOMMENDATION_TYPES).filter(
-      (t) => !discoveredSet.has(t)
-    );
+    // Carry forward stored types the UI doesn't render here, but only those known
+    // to be backend-valid (Nebius modules when the connection is off). Truly stale
+    // names from renamed/removed modules are dropped client-side so the strict
+    // backend validator (rejects unknowns with OE0217) doesn't bounce the toggle.
+    // When no option row exists (enabledTypes null), seed from NEBIUS_RECOMMENDATION_TYPES
+    // so the first save materialises the implicit "all enabled" default without
+    // silently disabling hidden Nebius modules.
+    const nebiusSet = new Set(NEBIUS_RECOMMENDATION_TYPES);
+    const passThrough = enabledTypes === null
+      ? NEBIUS_RECOMMENDATION_TYPES.filter((t) => !discoveredSet.has(t))
+      : enabledTypes.filter((t) => !discoveredSet.has(t) && nebiusSet.has(t));
     const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,
@@ -117,14 +113,6 @@ const RecommendationModulesSettings = () => {
       <Alert severity="warning" variant="outlined" sx={{ py: 0.5 }}>
         <FormattedMessage id="recommendationModuleApiCallsNote" />
       </Alert>
-      {newModuleCount > 0 && (
-        <Alert severity="info">
-          <FormattedMessage
-            id="recommendationModuleDiscoveryBanner"
-            values={{ count: newModuleCount }}
-          />
-        </Alert>
-      )}
       <Table size="small">
         <TableHead>
           <TableRow>
