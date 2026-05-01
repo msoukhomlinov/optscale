@@ -19,7 +19,7 @@ import {
 } from "@mui/material";
 import { FormattedMessage, useIntl } from "react-intl";
 import { useIsAllowed } from "hooks/useAllowedActions";
-import { useOptscaleRecommendations } from "hooks/useOptscaleRecommendations";
+import { useOptscaleRecommendations, NEBIUS_RECOMMENDATION_TYPES } from "hooks/useOptscaleRecommendations";
 import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 import { ALIBABA_CNR, AWS_CNR, AZURE_CNR, GCP_CNR, NEBIUS } from "utils/constants";
 
@@ -76,7 +76,7 @@ const RecommendationModulesSettings = () => {
     // Types in the stored option that aren't rendered here (e.g. Nebius modules when
     // the Nebius connection is removed) may still be valid on the backend — pass them
     // through unchanged so a visible-module toggle doesn't silently disable them.
-    const passThrough = (enabledTypes ?? []).filter((t) => !discoveredSet.has(t));
+    const passThrough = (enabledTypes ?? NEBIUS_RECOMMENDATION_TYPES).filter((t) => !discoveredSet.has(t));
     const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,
