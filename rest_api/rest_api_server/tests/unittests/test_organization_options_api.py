@@ -144,3 +144,77 @@ class TestCloudAccountApi(TestApiBase):
         code, _ = self.client.organization_option_delete(
             'abcd', self.name1)
         self.assertEqual(code, 404)
+
+    def test_enabled_recommendation_modules_create_valid(self):
+        # Lazy default: org1 has no row. First save creates row.
+        valid_value = {'value': json.dumps({'types': ['obsolete_ips']})}
+        with patch(
+            'rest_api.rest_api_server.controllers.organization_options.'
+            'list_recommendation_module_names',
+            return_value={'obsolete_ips', 'abandoned_instances'}
+        ):
+            code, resp = self.client.organization_option_create(
+                self.org_id1, 'enabled_recommendation_modules', valid_value)
+        self.assertEqual(code, 200)
+        self.assertEqual(resp, valid_value)
+
+    def test_enabled_recommendation_modules_create_unknown_module(self):
+        bad_value = {'value': json.dumps({'types': ['nonexistent_module']})}
+        with patch(
+            'rest_api.rest_api_server.controllers.organization_options.'
+            'list_recommendation_module_names',
+            return_value={'obsolete_ips', 'abandoned_instances'}
+        ):
+            code, resp = self.client.organization_option_create(
+                self.org_id1, 'enabled_recommendation_modules', bad_value)
+        self.assertEqual(code, 400)
+        # Verify error message references the unknown module name.
+        self.assertIn('nonexistent_module', str(resp))
+
+    def test_enabled_recommendation_modules_update_unknown_module(self):
+        # Pre-create a valid row, then attempt update with bad type.
+        valid_value = {'value': json.dumps({'types': ['obsolete_ips']})}
+        with patch(
+            'rest_api.rest_api_server.controllers.organization_options.'
+            'list_recommendation_module_names',
+            return_value={'obsolete_ips'}
+        ):
+            create_code, _ = self.client.organization_option_create(
+                self.org_id1, 'enabled_recommendation_modules', valid_value)
+            self.assertEqual(create_code, 200)
+            bad_value = {'value': json.dumps({'types': ['nonexistent_module']})}
+            code, resp = self.client.organization_option_update(
+                self.org_id1, 'enabled_recommendation_modules', bad_value)
+        self.assertEqual(code, 400)
+        self.assertIn('nonexistent_module', str(resp))
+
+    def test_enabled_recommendation_modules_malformed_json(self):
+        bad_value = {'value': 'not-a-json-string'}
+        code, resp = self.client.organization_option_create(
+            self.org_id1, 'enabled_recommendation_modules', bad_value)
+        self.assertEqual(code, 400)
+
+    def test_enabled_recommendation_modules_wrong_shape(self):
+        # value must be {"types": [...]}; a bare list is invalid.
+        bad_value = {'value': json.dumps(['obsolete_ips'])}
+        code, resp = self.client.organization_option_create(
+            self.org_id1, 'enabled_recommendation_modules', bad_value)
+        self.assertEqual(code, 400)
+
+    def test_enabled_recommendation_modules_empty_types_allowed(self):
+        valid_value = {'value': json.dumps({'types': []})}
+        with patch(
+            'rest_api.rest_api_server.controllers.organization_options.'
+            'list_recommendation_module_names',
+            return_value={'obsolete_ips'}
+        ):
+            code, resp = self.client.organization_option_create(
+                self.org_id1, 'enabled_recommendation_modules', valid_value)
+        self.assertEqual(code, 200)
+
+    def test_other_options_unaffected_by_validator(self):
+        # Validator must only fire for 'enabled_recommendation_modules'.
+        arbitrary_value = {'value': json.dumps({'foo': 'bar'})}
+        code, resp = self.client.organization_option_create(
+            self.org_id1, 'arbitrary_option_name', arbitrary_value)
+        self.assertEqual(code, 200)

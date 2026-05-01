@@ -5,6 +5,7 @@ import tarfile
 
 import pydevd_pycharm
 import tornado.ioloop
+import etcd
 from etcd import Lock as EtcdLock
 from tornado.web import RedirectHandler
 
@@ -73,6 +74,8 @@ def get_handlers(handler_kwargs, version=None):
              h_v2.organization_options.OrganizationOptionsAsyncCollectionHandler, handler_kwargs),
             (urls_v2.organization_options,
              h_v2.organization_options.OrganizationOptionsAsyncItemHandler, handler_kwargs),
+            (urls_v2.organization_recommendation_modules,
+             h_v2.organization_options.OrganizationRecommendationModulesAsyncHandler, handler_kwargs),
             (urls_v2.cloud_account_collection,
              h_v2.cloud_account.CloudAccountAsyncCollectionHandler,
              handler_kwargs),
@@ -495,11 +498,20 @@ def make_app(db_type, etcd_host, etcd_port, wait=False, otel_config=None):
     else:
         db.create_schema()
 
+    if otel_config is None:
+        try:
+            otel_config = config_cl.read_branch("/opentelemetry")
+        except etcd.EtcdKeyNotFound:
+            otel_config = {}
+    try:
+        otel_service_config = config_cl.read_branch("restapi/opentelemetry")
+    except etcd.EtcdKeyNotFound:
+        otel_service_config = {}
     config = OpenTelemetryConfig(
         service_name=os.getenv("OTEL_SERVICE_NAME", "restapi"),
         service_version=os.getenv("OTEL_SERVICE_VERSION", "local"),
-        otel_config=config_cl.read_branch("/opentelemetry"),
-        service_config=config_cl.read_branch("restapi/opentelemetry"),
+        otel_config=otel_config,
+        service_config=otel_service_config,
         sqlalchemy_engine=db.engine,
     )
     config.setup_open_telemetry()

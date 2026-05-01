@@ -1,4 +1,6 @@
+import { useEffect, useMemo } from "react";
 import { Grid } from "@mui/material";
+import { useRecommendationModulesOption } from "hooks/useRecommendationModulesOption";
 import Stack from "@mui/material/Stack";
 import { Box } from "@mui/system";
 import InlineSeverityAlert from "components/InlineSeverityAlert";
@@ -87,16 +89,64 @@ const RecommendationsOverview = ({
   const { classes } = useStyles();
   const checkDone = lastCompleted !== 0;
 
-  const recommendations = Object.values(recommendationClasses)
-    .map((RecommendationClass) => new RecommendationClass(STATUS.ACTIVE, recommendationsData))
-    .filter(categoryFilter(category))
-    .filter(serviceFilter(service))
-    .filter(searchFilter(search))
-    .filter(appliedDataSourcesFilter(selectedDataSourceTypes))
-    .sort(sortRecommendation);
+  const recommendations = useMemo(
+    () =>
+      Object.values(recommendationClasses)
+        .map((RecommendationClass) => new RecommendationClass(STATUS.ACTIVE, recommendationsData))
+        .filter(categoryFilter(category))
+        .filter(serviceFilter(service))
+        .filter(searchFilter(search))
+        .filter(appliedDataSourcesFilter(selectedDataSourceTypes))
+        .sort(sortRecommendation),
+    [recommendationClasses, recommendationsData, category, service, search, selectedDataSourceTypes]
+  );
+
+  const {
+    enabledTypes,
+    optionRowExists,
+    hasFetchedOption,
+    optionFailed,
+    fetchOption,
+  } = useRecommendationModulesOption();
+  useEffect(() => { fetchOption(); }, [fetchOption]);
+  const disabledModuleTypes = useMemo<ReadonlySet<string>>(() => {
+    // Read-only computation: gate on the option fetch only (the discovery
+    // endpoint is only needed by the settings writer). Until the option
+    // fetch resolves, return empty so the overview does not flash modules
+    // as disabled based on stale store data — Cards/Table receive the
+    // matching isLoading flag below so a user cannot click into a module
+    // before we know whether it is enabled.
+    // On option-fetch failure (transient 5xx, network drop), degrade
+    // gracefully: treat all modules as enabled rather than locking the
+    // entire recommendations page in a perpetual loader; surface a
+    // dismissible warning banner so the user knows they may be acting on
+    // stale disable-state.
+    if (!hasFetchedOption) return new Set<string>();
+    if (!optionRowExists || !enabledTypes) return new Set<string>();
+    const enabled = new Set(enabledTypes);
+    return new Set(
+      recommendations
+        .map((r: BaseRecommendation) => r.type)
+        .filter((t: string) => !enabled.has(t))
+    );
+  }, [hasFetchedOption, optionRowExists, enabledTypes, recommendations]);
+
+  // The overview can still render recommendations when the option fetch
+  // has not finished yet, but only after it has either succeeded OR
+  // explicitly failed — otherwise we would briefly let users click into
+  // a module that is actually disabled.
+  const moduleStateResolved = hasFetchedOption || optionFailed;
 
   return (
     <Stack spacing={SPACING_2}>
+      {optionFailed && (
+        <div>
+          <InlineSeverityAlert
+            severity="warning"
+            messageId="recommendationModuleStateUnavailable"
+          />
+        </div>
+      )}
       <div>
         <Summary
           totalSaving={totalSaving}
@@ -133,24 +183,26 @@ const RecommendationsOverview = ({
               <Box className={classes.cardsGrid}>
                 <Cards
                   recommendations={recommendations}
-                  isLoading={!isDataReady}
+                  isLoading={!isDataReady || !moduleStateResolved}
                   downloadLimit={downloadLimit}
                   onRecommendationClick={onRecommendationClick}
                   isDownloadAvailable={isDownloadAvailable}
                   isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
                   selectedDataSourceIds={selectedDataSourceIds}
+                  disabledModuleTypes={disabledModuleTypes}
                 />
               </Box>
             )}
             {view === VIEW_TABLE && (
               <RecommendationsTable
                 recommendations={recommendations}
-                isLoading={!isDataReady}
+                isLoading={!isDataReady || !moduleStateResolved}
                 downloadLimit={downloadLimit}
                 onRecommendationClick={onRecommendationClick}
                 isDownloadAvailable={isDownloadAvailable}
                 isGetIsDownloadAvailableLoading={isGetIsDownloadAvailableLoading}
                 selectedDataSourceIds={selectedDataSourceIds}
+                disabledModuleTypes={disabledModuleTypes}
               />
             )}
           </>

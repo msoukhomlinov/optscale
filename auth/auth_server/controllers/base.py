@@ -199,9 +199,13 @@ class BaseController(object):
                 for entity_type, entities in node.items():
                     if isinstance(entities, dict):
                         for entity_id, children in entities.items():
-                            start_collect = collect or entity_id == target_id
+                            # JSON serialisation turns None keys into the string
+                            # 'null'; normalise here so root assignments
+                            # (target_id=None) match correctly.
+                            normalised_id = None if entity_id == 'null' else entity_id
+                            start_collect = collect or normalised_id == target_id
                             if start_collect:
-                                aset.add((entity_id, entity_type, action))
+                                aset.add((normalised_id, entity_type, action))
                             render_item(children, action, start_collect)
                     elif isinstance(entities, list):
                         for entity_id in entities:

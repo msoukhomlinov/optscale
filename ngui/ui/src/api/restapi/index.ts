@@ -1,6 +1,7 @@
 import {
   getOrganizationOptions,
   getOrganizationOption,
+  getDiscoveredRecommendationModules,
   getOrganizationConstraints,
   updateOrganizationOption,
   createOrganizationOption,
@@ -206,6 +207,7 @@ import {
 export {
   getOrganizationOptions,
   getOrganizationOption,
+  getDiscoveredRecommendationModules,
   getOrganizationConstraints,
   updateOrganizationOption,
   createOrganizationOption,

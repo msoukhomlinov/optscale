@@ -53,6 +53,13 @@ class IntelligentTiering extends BaseRecommendation {
 
   categories = [CATEGORY.COST];
 
+  apiCallInfo = {
+    description: "AWS CloudWatch GetMetricStatistics",
+    volume: "~1 call/bucket/run",
+    cost: "$0.01 per 1,000 calls (first 1M calls/mo free)",
+    pricingUrl: "https://aws.amazon.com/cloudwatch/pricing/",
+  };
+
   withExclusions = true;
 
   static resourceDescriptionMessageId = "intelligentTieringResourceRecommendation";

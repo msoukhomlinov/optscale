@@ -69,6 +69,68 @@ class OrganizationOptionsAsyncCollectionHandler(BaseAsyncItemHandler, BaseAuthHa
         self.write(json.dumps(option_dict, cls=ModelEncoder))
 
 
+class OrganizationRecommendationModulesAsyncHandler(BaseAsyncItemHandler, BaseAuthHandler, BaseHandler):
+    """Expose backend's discovered recommendation module names so the UI can
+    correctly filter the `enabled_recommendation_modules` whitelist against
+    the deployment's current module set (avoids OE0217 from stale stored
+    names and avoids silently disabling hidden-but-valid modules on first
+    toggle during version skew)."""
+
+    def _get_controller_class(self):
+        return OrganizationOptionsAsyncController
+
+    async def get(self, organization_id):
+        """
+        ---
+        description: |
+            Returns the list of recommendation module names currently
+            registered in the backend (filename-based discovery).
+            Required permission: INFO_ORGANIZATION or CLUSTER_SECRET
+        tags: [organization_options]
+        summary: Backend-discovered recommendation modules
+        parameters:
+        -   name: organization_id
+            in: path
+            description: Organization ID
+            required: true
+            type: string
+        responses:
+            200:
+                description: Discovered module list
+                schema:
+                    type: object
+                    properties:
+                        types:
+                            type: array
+                            items:
+                                type: string
+                                description: module filename
+            401:
+                description: |
+                    Unauthorized:
+                    - OE0235: Unauthorized
+                    - OE0237: This resource requires authorization
+            403:
+                description: |
+                    Forbidden:
+                    - OE0234: Forbidden
+            404:
+                description: |
+                    Not found:
+                    - OE0002: Organization not found
+        security:
+        - token: []
+        - secret: []
+        """
+        if not self.check_cluster_secret(raises=False):
+            await self.check_permissions(
+                'INFO_ORGANIZATION', 'organization', organization_id)
+        types = await run_task(
+            self.controller.list_discovered_recommendation_modules,
+            organization_id)
+        self.write(json.dumps({'types': types}, cls=ModelEncoder))
+
+
 class OrganizationOptionsAsyncItemHandler(BaseAsyncItemHandler, BaseAuthHandler, BaseHandler):
     def _get_controller_class(self):
         return OrganizationOptionsAsyncController

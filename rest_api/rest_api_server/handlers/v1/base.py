@@ -359,6 +359,7 @@ class BaseAuthHandler(BaseHandler):
     def _get_user_info(self, user_id):
         client = AuthClient(url=Config().auth_url)
         client.token = self.token
+        client.secret = self._config.cluster_secret()
         _, user = client.user_get(user_id)
         return user
 

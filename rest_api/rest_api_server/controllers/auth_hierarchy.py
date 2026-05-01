@@ -46,6 +46,14 @@ class AuthHierarchyController(object):
     def auth_hierarchy(self, type=None, scope_id=None):
         if not type:
             raise WrongArgumentsException(Err.OE0216, ['type'])
+        if type == 'root':
+            # Root lookups must not carry a scope_id — auth's root assignment
+            # has resource_id=None, so any explicit scope on the request is
+            # malformed and should fail fast rather than silently expand to
+            # the full organization+pool tree.
+            if scope_id is not None:
+                raise WrongArgumentsException(Err.OE0212, ['scope_id'])
+            return self._auth_hierarchy_root()
         if not scope_id:
             raise WrongArgumentsException(Err.OE0216, ['scope_id'])
         self._check_resource(type, scope_id)
@@ -76,6 +84,35 @@ class AuthHierarchyController(object):
                 pool=copy.deepcopy(result['organization'][queryset[0][0]][t]))
         }
         return result_scope.get(type)(type)
+
+    def _auth_hierarchy_root(self):
+        """Return the full organization/pool hierarchy for root-scoped lookups.
+
+        Root-type assignments in the auth service have no scope_id — the
+        assignee has access to everything.  The auth service calls
+        auth_hierarchy_get('root', None) so it can expand that assignment into
+        concrete (type, resource_id) pairs via render().
+
+        The auth service's render() expects the shape:
+            {'root': {'null': {'organization': {org_id: {'pool': [pool_id, ...]}, ...}}}}
+
+        The outer 'root' key matches the first ordered Type.  The 'null' key
+        is the sentinel the render() loop uses to seed id_item_hierarchy_map
+        for the root level (parent_id=None → 'null').
+        """
+        orgs = {}
+        sql = self.session.query(Organization.id, Pool.id).outerjoin(
+            Pool, and_(
+                Pool.organization_id == Organization.id,
+                Pool.deleted.is_(False))
+        ).filter(Organization.deleted.is_(False))
+        for organization_id, pool_id in sql.order_by(
+                Organization.id, Pool.id).all():
+            if organization_id not in orgs:
+                orgs[organization_id] = {'pool': []}
+            if pool_id is not None:
+                orgs[organization_id]['pool'].append(pool_id)
+        return {'root': {'null': {'organization': orgs}}}
 
     def on_finish(self):
         pass
