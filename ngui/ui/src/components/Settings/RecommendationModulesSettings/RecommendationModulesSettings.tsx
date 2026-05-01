@@ -82,10 +82,15 @@ const RecommendationModulesSettings = () => {
     else next.delete(type);
     setOptimisticEnabled(next);
     const discoveredSet = new Set(discovered);
-    // Types in the stored option that aren't rendered here (e.g. Nebius modules when
-    // the Nebius connection is removed) may still be valid on the backend — pass them
-    // through unchanged so a visible-module toggle doesn't silently disable them.
-    const passThrough = (enabledTypes ?? NEBIUS_RECOMMENDATION_TYPES).filter((t) => !discoveredSet.has(t));
+    // Types stored in the option but not rendered here (e.g. Nebius modules when the
+    // Nebius connection is removed) are preserved only if they belong to a known-valid
+    // hidden set. Arbitrary stored types (stale/renamed modules) are dropped to avoid
+    // backend OE0217 from the unknown-module validator. When no row exists yet
+    // (enabledTypes null) there is nothing stored to preserve.
+    const nebiusSet = new Set(NEBIUS_RECOMMENDATION_TYPES);
+    const passThrough = (enabledTypes ?? []).filter(
+      (t) => !discoveredSet.has(t) && nebiusSet.has(t)
+    );
     const visibleSelected = Array.from(next).filter((t) => discoveredSet.has(t));
     if (visibleSelected.length === 0) {
       // Submit [] on confirm so ALL modules (including hidden) are truly disabled,
