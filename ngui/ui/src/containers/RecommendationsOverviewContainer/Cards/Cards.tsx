@@ -99,8 +99,8 @@ const Cards = ({
             )}
           </>
         }
-        cta={r.count > 0 && <FormattedMessage id="seeAllItems" values={{ value: r.count }} />}
-        onCtaClick={() => onRecommendationClick(r)}
+        cta={!isDisabled && r.count > 0 && <FormattedMessage id="seeAllItems" values={{ value: r.count }} />}
+        onCtaClick={isDisabled ? undefined : () => onRecommendationClick(r)}
         menu={
           <Actions
             downloadLimit={downloadLimit}
